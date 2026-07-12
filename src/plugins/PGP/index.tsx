@@ -9,23 +9,30 @@ import {
   findOption,
 } from "@api/Commands";
 import { ChannelStore } from "@webpack/common";
+
 import {
-  getSettings,
-  saveSettings,
   getOwnKeypair,
   listKnownUsers,
+  saveOwnKeypair,
+  // NOTE: we will NOT read passphrase from keystore anymore
+  getSettings as keystoreGetSettings,
+  saveSettings as keystoreSaveSettings,
 } from "./keystore";
+
 import {
   isUnlocked,
   lockSession,
   unlockSession,
   createAndUnlockNewKeypair,
 } from "./session";
+
 import { getOwnPublicKeyArmored, importFriendPublicKey } from "./keyExchange";
+
 import {
   registerOutgoingEncryption,
   unregisterOutgoingEncryption,
 } from "./outgoing";
+
 import { PgpDecryptedAccessory } from "./PgpDecryptedAccessory";
 
 const settings = definePluginSettings({
@@ -50,13 +57,23 @@ const settings = definePluginSettings({
       "Prompt for confirmation before trusting a newly detected public key",
     default: true,
   },
+
   passphrase: {
     type: OptionType.STRING,
     description:
-      "Session passphrase used to unlock your private key (not stored)",
+      "Session passphrase used to unlock your private key (may be saved depending on host behavior)",
     default: "",
   },
+
+  autoUnlockOnStart: {
+    type: OptionType.BOOLEAN,
+    description: "Automatically unlock your private key on startup (if passphrase is set)",
+    default: false,
+  },
 });
+
+let cachedPassphrase = "";
+let cachedAutoUnlockOnStart = false;
 
 export default definePlugin({
   name: "PGP",
@@ -120,9 +137,47 @@ export default definePlugin({
         }
       },
     },
+
+{
+  name: "pgp-unlock",
+  description: "Unlock your PGP private key for this session",
+  execute: async () => {
+    try {
+      const passphrase = settings.store.passphrase;
+
+      if (!passphrase) {
+        return {
+          content: "No passphrase set in plugin settings.",
+        };
+      }
+
+      const ok = await unlockSession(passphrase);
+
+      return ok
+        ? { content: "PGP unlocked for this session ✅" }
+        : { content: "Incorrect passphrase ❌" };
+    } catch (err) {
+      return {
+        content: `Error: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+    }
+  },
+},
   ],
 
   async start() {
+    // Initialize cache from keystore settings if possible
+    // (This is only for first load; if keystore storage differs, user can re-save once.)
+    try {
+      const s = await keystoreGetSettings();
+      cachedPassphrase = s.passphrase ?? "";
+      cachedAutoUnlockOnStart = !!s.autoUnlockOnStart;
+    } catch {
+      // ignore, user can re-save in UI to populate cache
+    }
+
     const existing = await getOwnKeypair();
     if (!existing) {
       console.log(
@@ -132,6 +187,15 @@ export default definePlugin({
       console.log(
         `[PGP] Loaded existing keypair (fingerprint: ${existing.fingerprint}). Unlock required before use.`,
       );
+    }
+
+    if (cachedAutoUnlockOnStart && cachedPassphrase) {
+      try {
+        const ok = await unlockSession(cachedPassphrase);
+        if (ok) console.log("[PGP] Auto-unlocked after startup ✅");
+      } catch (e) {
+        console.warn("[PGP] Auto-unlock failed:", e);
+      }
     }
 
     addMessageAccessory("pgp-decrypted-content", props => {
@@ -181,11 +245,18 @@ export default definePlugin({
   },
 
   async getSettings() {
-    return getSettings();
+    // plugin framework calls this; also update cache
+    const s = await keystoreGetSettings();
+    cachedPassphrase = s.passphrase ?? "";
+    cachedAutoUnlockOnStart = !!s.autoUnlockOnStart;
+    return s;
   },
 
-  async saveSettings(next: Awaited<ReturnType<typeof getSettings>>) {
-    return saveSettings(next);
+  async saveSettings(next) {
+    // plugin framework calls this; update cache and persist if it works
+    cachedPassphrase = next.passphrase ?? "";
+    cachedAutoUnlockOnStart = !!next.autoUnlockOnStart;
+    return keystoreSaveSettings(next);
   },
 
   async getOwnPublicKeyArmored() {

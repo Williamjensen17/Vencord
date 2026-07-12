@@ -115,6 +115,13 @@ export interface PgpSettingsRecord {
   autoDecrypt: boolean;
   signMessages: boolean;
   promptBeforeTrust: boolean;
+
+  // Added so unlock can work across restarts (depending on whether your
+  // settings system persists this).
+  passphrase: string;
+
+  // Added: auto-unlock once after restart if passphrase is present.
+  autoUnlockOnStart: boolean;
 }
 
 const DEFAULT_SETTINGS: PgpSettingsRecord = {
@@ -122,6 +129,8 @@ const DEFAULT_SETTINGS: PgpSettingsRecord = {
   autoDecrypt: true,
   signMessages: true,
   promptBeforeTrust: true,
+  passphrase: "",
+  autoUnlockOnStart: false,
 };
 
 export async function getSettings(): Promise<PgpSettingsRecord> {

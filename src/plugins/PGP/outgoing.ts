@@ -2,7 +2,7 @@ import {
   addMessagePreSendListener,
   removeMessagePreSendListener,
 } from "@api/MessageEvents";
-import { getKey } from "./keystore";
+import { getKey, getOwnKeypair } from "./keystore";
 import { parsePublicKey, encryptText } from "./crypto";
 import { getUnlockedPrivateKey, isUnlocked } from "./session";
 
@@ -38,6 +38,14 @@ const listener = async (_channelId, messageObj, _options, props) => {
   const pubKey = await parsePublicKey(entry.publicKeyArmored);
   if (!pubKey) return;
 
+  const encryptionKeys = [pubKey];
+
+  const ownKeypair = await getOwnKeypair();
+  if (ownKeypair?.publicKeyArmored) {
+    const ownPub = await parsePublicKey(ownKeypair.publicKeyArmored);
+    if (ownPub) encryptionKeys.push(ownPub);
+  }
+
   let signingKey;
   if (isUnlocked()) {
     signingKey = getUnlockedPrivateKey();
@@ -45,7 +53,7 @@ const listener = async (_channelId, messageObj, _options, props) => {
 
   messageObj.content = await encryptText({
     text: content,
-    recipientPublicKeys: [pubKey],
+    recipientPublicKeys: encryptionKeys,
     signingKey,
   });
 };

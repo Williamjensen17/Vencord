@@ -9,6 +9,8 @@ import {
   findOption,
 } from "@api/Commands";
 import { ChannelStore } from "@webpack/common";
+import { createAndAppendStyle } from "@utils/css";
+import { managedStyleRootNode } from "@api/Styles";
 
 import {
   getOwnKeypair,
@@ -35,6 +37,8 @@ import {
 } from "./outgoing";
 
 import { PgpDecryptedAccessory } from "./PgpDecryptedAccessory";
+
+let pgpStyle: HTMLStyleElement;
 
 const settings = definePluginSettings({
   autoEncryptDms: {
@@ -75,6 +79,16 @@ export default definePlugin({
     "Encrypts outgoing messages/files with PGP and decrypts incoming ones.",
   authors: [{ name: "William", id: 0n }],
   settings,
+
+  patches: [
+    {
+      find: "Message must not be a thread starter message",
+      replacement: {
+        match: /\)\("li",\{(.+?),className:/,
+        replace: ")(\"li\",{$1,className:(arguments[0].message?.content?.includes(\"-----BEGIN PGP MESSAGE-----\")?\"vc-pgp-encrypted \":\"\")+"
+      },
+    },
+  ],
 
   commands: [
     // ✅ SEND YOUR PUBLIC KEY
@@ -191,6 +205,16 @@ export default definePlugin({
   ],
 
   async start() {
+    pgpStyle = createAndAppendStyle("VcPGPEncrypted", managedStyleRootNode);
+    pgpStyle.textContent = `
+      .vc-pgp-encrypted [class*="messageContent"] {
+        display: none !important;
+      }
+      .vc-pgp-decrypted {
+        color: #dbdee1 !important;
+      }
+    `;
+
     registerOutgoingEncryption();
 
     addMessageAccessory("pgp-decrypted-content", props => {
@@ -211,6 +235,7 @@ export default definePlugin({
   },
 
   stop() {
+    pgpStyle?.remove();
     lockSession();
     unregisterOutgoingEncryption();
     removeMessageAccessory("pgp-decrypted-content");

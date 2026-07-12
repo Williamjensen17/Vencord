@@ -37,12 +37,12 @@ export function PgpDecryptedAccessory({
   }
 
   return (
-    <div>
-      <div>
+    <div className="vc-pgp-decrypted" style={{ marginTop: 4 }}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>
         🔓 Decrypted{" "}
         {state.verified === true ? "✅" : ""}
       </div>
-      <div>{state.plaintext}</div>
+      <div style={{ whiteSpace: "pre-wrap" }}>{state.plaintext}</div>
     </div>
   );
 }

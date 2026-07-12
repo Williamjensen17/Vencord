@@ -1,3 +1,5 @@
+import type { Key } from "openpgp";
+
 import { decryptText, parsePublicKey } from "./crypto";
 import { getUnlockedPrivateKey, isUnlocked } from "./session";
 import { getKey } from "./keystore";
@@ -21,13 +23,13 @@ export async function tryDecryptMessage(
     const privateKey = getUnlockedPrivateKey();
 
     const senderEntry = await getKey(senderId);
-    let verifyKeys = [];
+    const verifyKeys: Key[] = [];
 
     if (senderEntry?.publicKeyArmored) {
       const pub = await parsePublicKey(
         senderEntry.publicKeyArmored,
       );
-      if (pub) verifyKeys = [pub];
+      if (pub) verifyKeys.push(pub);
     }
 
     const result = await decryptText(

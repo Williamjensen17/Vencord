@@ -31,16 +31,24 @@ async function saveUsersMap(map: UsersMap): Promise<void> {
 }
 
 export async function addOrUpdateKey(
-  entry: Omit<PgpUserEntry, "addedAt"> & { addedAt?: number },
+  entry: Omit<PgpUserEntry, "addedAt" | "autoEncryptEnabled" | "trusted"> & {
+    addedAt?: number;
+    autoEncryptEnabled?: boolean;
+    trusted?: boolean;
+  },
 ): Promise<PgpUserEntry> {
   const map = await loadUsersMap();
   const existing = map[entry.userId];
 
+  // Spreads first, resolved values last: spreading `entry` afterwards would
+  // clobber these fallbacks with its own undefined fields.
   const full: PgpUserEntry = {
-    addedAt: existing?.addedAt ?? Date.now(),
-    autoEncryptEnabled: existing?.autoEncryptEnabled ?? true,
-    trusted: entry.trusted ?? existing?.trusted ?? false,
+    ...existing,
     ...entry,
+    addedAt: existing?.addedAt ?? entry.addedAt ?? Date.now(),
+    autoEncryptEnabled:
+      entry.autoEncryptEnabled ?? existing?.autoEncryptEnabled ?? true,
+    trusted: entry.trusted ?? existing?.trusted ?? false,
   };
 
   map[entry.userId] = full;

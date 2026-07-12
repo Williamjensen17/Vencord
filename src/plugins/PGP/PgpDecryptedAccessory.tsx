@@ -29,11 +29,11 @@ export function PgpDecryptedAccessory({
   }, [content, senderId]);
 
   if (state.status === "loading") {
-    return <div>🔒 Decrypting…</div>;
+    return <div className="vc-pgp-decrypted">🔒 Decrypting…</div>;
   }
 
   if (state.status === "error") {
-    return <div>⚠️ {state.error}</div>;
+    return <div className="vc-pgp-decrypted">⚠️ {state.error}</div>;
   }
 
   return (

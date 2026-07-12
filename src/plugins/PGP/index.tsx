@@ -14,7 +14,6 @@ import {
   getOwnKeypair,
   listKnownUsers,
   saveOwnKeypair,
-  // NOTE: we will NOT read passphrase from keystore anymore
   getSettings as keystoreGetSettings,
   saveSettings as keystoreSaveSettings,
 } from "./keystore";
@@ -31,6 +30,8 @@ import { getOwnPublicKeyArmored, importFriendPublicKey } from "./keyExchange";
 import {
   registerOutgoingEncryption,
   unregisterOutgoingEncryption,
+  setPgpEnabled,
+  isPgpEnabled,
 } from "./outgoing";
 
 import { PgpDecryptedAccessory } from "./PgpDecryptedAccessory";
@@ -38,56 +39,45 @@ import { PgpDecryptedAccessory } from "./PgpDecryptedAccessory";
 const settings = definePluginSettings({
   autoEncryptDms: {
     type: OptionType.BOOLEAN,
-    description: "Automatically encrypt outgoing DMs to known PGP users",
     default: true,
+    description: "Automatically encrypt outgoing DMs to known PGP users",
   },
   autoDecrypt: {
     type: OptionType.BOOLEAN,
-    description: "Automatically decrypt incoming PGP messages",
     default: true,
+    description: "Automatically decrypt incoming PGP messages",
   },
   signMessages: {
     type: OptionType.BOOLEAN,
-    description: "Sign outgoing encrypted messages with your private key",
     default: true,
+    description: "Sign outgoing encrypted messages",
   },
   promptBeforeTrust: {
     type: OptionType.BOOLEAN,
-    description:
-      "Prompt for confirmation before trusting a newly detected public key",
     default: true,
+    description: "Prompt before trusting new public keys",
   },
-
   passphrase: {
     type: OptionType.STRING,
-    description:
-      "Session passphrase used to unlock your private key (may be saved depending on host behavior)",
     default: "",
+    description: "Session passphrase for unlocking private key",
   },
-
   autoUnlockOnStart: {
     type: OptionType.BOOLEAN,
-    description: "Automatically unlock your private key on startup (if passphrase is set)",
     default: false,
+    description: "Auto-unlock on startup",
   },
 });
-
-let cachedPassphrase = "";
-let cachedAutoUnlockOnStart = false;
 
 export default definePlugin({
   name: "PGP",
   description:
-    "Automatically encrypts outgoing messages/files with PGP and decrypts incoming ones.",
-  authors: [
-    {
-      name: "William",
-      id: 0n,
-    },
-  ],
+    "Encrypts outgoing messages/files with PGP and decrypts incoming ones.",
+  authors: [{ name: "William", id: 0n }],
   settings,
 
   commands: [
+    // ✅ SEND YOUR PUBLIC KEY
     {
       name: "pgp-pubkey",
       description: "Send your PGP public key in this channel",
@@ -97,14 +87,18 @@ export default definePlugin({
           return { content: armored };
         } catch (err) {
           return {
-            content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+            content: `Error: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
           };
         }
       },
     },
+
+    // ✅ IMPORT FRIEND PUBLIC KEY
     {
       name: "pgp-import",
-      description: "Import a friend's PGP public key for this DM",
+      description: "Import a friend's PGP public key (1:1 DM only)",
       options: [
         {
           name: "key",
@@ -122,81 +116,82 @@ export default definePlugin({
           if (!userId) {
             return {
               content:
-                "Could not determine the DM recipient. This command must be run inside a 1:1 DM.",
+                "This command must be run inside a 1:1 DM.",
             };
           }
 
           const entry = await importFriendPublicKey(userId, key);
+
           return {
-            content: `Imported public key for <@${userId}> (fingerprint: ${entry.fingerprint}) ✅`,
+            content:
+              `✅ Imported key for <@${userId}>\n` +
+              `Fingerprint: ${entry.fingerprint}`,
           };
         } catch (err) {
           return {
-            content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+            content: `Error: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
           };
         }
       },
     },
 
-{
-  name: "pgp-unlock",
-  description: "Unlock your PGP private key for this session",
-  execute: async () => {
-    try {
-      const passphrase = settings.store.passphrase;
+    // ✅ TOGGLE ENCRYPTION
+    {
+      name: "pgp-toggle",
+      description: "Quickly enable/disable PGP encryption",
+      execute: async () => {
+        const next = !isPgpEnabled();
+        setPgpEnabled(next);
 
-      if (!passphrase) {
+        if (!next) {
+          lockSession();
+        }
+
         return {
-          content: "No passphrase set in plugin settings.",
+          content: next
+            ? "🔐 PGP encryption ENABLED."
+            : "🔓 PGP encryption DISABLED.",
         };
-      }
+      },
+    },
 
-      const ok = await unlockSession(passphrase);
+    // ✅ STATUS
+    {
+      name: "pgp-status",
+      description: "Show current PGP session status",
+      execute: async () => {
+        return {
+          content:
+            `PGP Enabled: ${isPgpEnabled() ? "✅ Yes" : "❌ No"}\n` +
+            `Session Unlocked: ${isUnlocked() ? "✅ Yes" : "❌ No"}`,
+        };
+      },
+    },
 
-      return ok
-        ? { content: "PGP unlocked for this session ✅" }
-        : { content: "Incorrect passphrase ❌" };
-    } catch (err) {
-      return {
-        content: `Error: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      };
-    }
-  },
-},
+    // ✅ UNLOCK
+    {
+      name: "pgp-unlock",
+      description: "Unlock your PGP private key for this session",
+      execute: async () => {
+        const passphrase = settings.store.passphrase;
+
+        if (!passphrase) {
+          return { content: "No passphrase set in plugin settings." };
+        }
+
+        const ok = await unlockSession(passphrase);
+
+        return ok
+          ? { content: "PGP unlocked ✅" }
+          : { content: "Incorrect passphrase ❌" };
+      },
+    },
   ],
 
   async start() {
-    // Initialize cache from keystore settings if possible
-    // (This is only for first load; if keystore storage differs, user can re-save once.)
-    try {
-      const s = await keystoreGetSettings();
-      cachedPassphrase = s.passphrase ?? "";
-      cachedAutoUnlockOnStart = !!s.autoUnlockOnStart;
-    } catch {
-      // ignore, user can re-save in UI to populate cache
-    }
-
-    const existing = await getOwnKeypair();
-    if (!existing) {
-      console.log(
-        "[PGP] No keypair found. Generate one via the plugin settings panel.",
-      );
-    } else {
-      console.log(
-        `[PGP] Loaded existing keypair (fingerprint: ${existing.fingerprint}). Unlock required before use.`,
-      );
-    }
-
-    if (cachedAutoUnlockOnStart && cachedPassphrase) {
-      try {
-        const ok = await unlockSession(cachedPassphrase);
-        if (ok) console.log("[PGP] Auto-unlocked after startup ✅");
-      } catch (e) {
-        console.warn("[PGP] Auto-unlock failed:", e);
-      }
-    }
+    registerOutgoingEncryption();
 
     addMessageAccessory("pgp-decrypted-content", props => {
       const message = props.message;
@@ -212,69 +207,12 @@ export default definePlugin({
       );
     });
 
-    registerOutgoingEncryption();
+    console.log("[PGP] Encryption is ENABLED by default.");
   },
 
   stop() {
     lockSession();
-    removeMessageAccessory("pgp-decrypted-content");
     unregisterOutgoingEncryption();
-  },
-
-  async generateNewKeypair(name: string, email: string, passphrase: string) {
-    await createAndUnlockNewKeypair(name, email, passphrase);
-    console.log("[PGP] New keypair generated and unlocked for this session.");
-  },
-
-  async unlock(passphrase: string) {
-    const ok = await unlockSession(passphrase);
-    if (!ok) {
-      console.error("[PGP] Failed to unlock: incorrect passphrase.");
-    } else {
-      console.log("[PGP] Session unlocked.");
-    }
-    return ok;
-  },
-
-  isSessionUnlocked() {
-    return isUnlocked();
-  },
-
-  async listUsers() {
-    return listKnownUsers();
-  },
-
-  async getSettings() {
-    // plugin framework calls this; also update cache
-    const s = await keystoreGetSettings();
-    cachedPassphrase = s.passphrase ?? "";
-    cachedAutoUnlockOnStart = !!s.autoUnlockOnStart;
-    return s;
-  },
-
-  async saveSettings(next) {
-    // plugin framework calls this; update cache and persist if it works
-    cachedPassphrase = next.passphrase ?? "";
-    cachedAutoUnlockOnStart = !!next.autoUnlockOnStart;
-    return keystoreSaveSettings(next);
-  },
-
-  async getOwnPublicKeyArmored() {
-    return getOwnPublicKeyArmored();
-  },
-
-  async importFriendPublicKey(
-    userId: string,
-    armoredKey: string,
-    trusted = false,
-  ) {
-    return importFriendPublicKey(userId, armoredKey, trusted);
-  },
-
-  _debugEncrypt: async (text: string) => {
-    const { encryptText, parsePublicKey } = await import("./crypto");
-    const record = await getOwnKeypair();
-    const pub = await parsePublicKey(record!.publicKeyArmored);
-    return encryptText({ text, recipientPublicKeys: [pub!] });
+    removeMessageAccessory("pgp-decrypted-content");
   },
 });

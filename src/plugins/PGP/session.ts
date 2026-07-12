@@ -10,22 +10,18 @@ export function isUnlocked(): boolean {
 
 export function getUnlockedPrivateKey(): openpgp.PrivateKey {
   if (!unlockedPrivateKey) {
-    throw new Error("PGP private key is not unlocked for this session.");
+    throw new Error("Private key not unlocked.");
   }
   return unlockedPrivateKey;
 }
 
-export function lockSession(): void {
+export function lockSession() {
   unlockedPrivateKey = null;
 }
 
-/**
- * Attempts to unlock the stored keypair with the given passphrase.
- * Returns true on success, false on wrong passphrase.
- */
-export async function unlockSession(passphrase: string): Promise<boolean> {
+export async function unlockSession(passphrase: string) {
   const record = await getOwnKeypair();
-  if (!record) throw new Error("No PGP keypair has been generated yet.");
+  if (!record) throw new Error("No keypair exists.");
 
   try {
     unlockedPrivateKey = await unlockPrivateKey(
@@ -38,15 +34,11 @@ export async function unlockSession(passphrase: string): Promise<boolean> {
   }
 }
 
-/**
- * Generates a brand-new keypair, persists the (still-encrypted) private key,
- * and unlocks it for the current session immediately.
- */
 export async function createAndUnlockNewKeypair(
   name: string,
   email: string,
   passphrase: string,
-): Promise<void> {
+) {
   const generated = await generateKeypair(name, email, passphrase);
 
   await saveOwnKeypair({

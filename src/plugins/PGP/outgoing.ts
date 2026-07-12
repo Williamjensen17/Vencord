@@ -1,53 +1,45 @@
-import type {
-  MessageObject,
-  MessageSendListener,
-} from "@api/MessageEvents";
 import {
   addMessagePreSendListener,
   removeMessagePreSendListener,
 } from "@api/MessageEvents";
-import { getKey, getSettings } from "./keystore";
-import {
-  parsePublicKey,
-  encryptText,
-  looksLikeArmoredMessage,
-} from "./crypto";
+import { getKey } from "./keystore";
+import { parsePublicKey, encryptText } from "./crypto";
 import { getUnlockedPrivateKey, isUnlocked } from "./session";
 
-/**
- * Given a DM channel, returns the other participant's user ID.
- * Returns null for group DMs / guild channels (not supported here).
- */
-function getDmRecipientId(channel: { recipients?: string[] }): string | null {
+let pgpEnabled = true;
+
+export function setPgpEnabled(enabled: boolean) {
+  pgpEnabled = enabled;
+}
+
+export function isPgpEnabled() {
+  return pgpEnabled;
+}
+
+function getDmRecipientId(channel: { recipients?: string[] }) {
   if (channel.recipients?.length === 1) {
     return channel.recipients[0];
   }
   return null;
 }
 
-const listener: MessageSendListener = async (
-  channelId,
-  messageObj: MessageObject,
-  _options,
-  props,
-) => {
-  const settings = await getSettings();
-  if (!settings.autoEncryptDms) return;
+const listener = async (_channelId, messageObj, _options, props) => {
+  if (!pgpEnabled) return;
 
   const content = messageObj.content;
-  if (!content || looksLikeArmoredMessage(content)) return;
+  if (!content) return;
 
   const recipientId = getDmRecipientId(props.channel as any);
-  if (!recipientId) return; // not a 1:1 DM, skip
+  if (!recipientId) return;
 
   const entry = await getKey(recipientId);
-  if (!entry?.publicKeyArmored || !entry.autoEncryptEnabled) return;
+  if (!entry?.publicKeyArmored) return;
 
   const pubKey = await parsePublicKey(entry.publicKeyArmored);
   if (!pubKey) return;
 
   let signingKey;
-  if (settings.signMessages && isUnlocked()) {
+  if (isUnlocked()) {
     signingKey = getUnlockedPrivateKey();
   }
 
@@ -58,10 +50,10 @@ const listener: MessageSendListener = async (
   });
 };
 
-export function registerOutgoingEncryption(): void {
+export function registerOutgoingEncryption() {
   addMessagePreSendListener(listener);
 }
 
-export function unregisterOutgoingEncryption(): void {
+export function unregisterOutgoingEncryption() {
   removeMessagePreSendListener(listener);
 }

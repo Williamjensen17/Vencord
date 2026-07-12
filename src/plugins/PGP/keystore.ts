@@ -2,7 +2,6 @@ import { DataStore } from "@api/index";
 
 const USERS_STORE_KEY = "PGP_KNOWN_USERS";
 const OWN_KEYPAIR_STORE_KEY = "PGP_OWN_KEYPAIR";
-const SETTINGS_STORE_KEY = "PGP_SETTINGS";
 
 export interface PgpUserEntry {
   userId: string;
@@ -49,99 +48,22 @@ export async function addOrUpdateKey(
   return full;
 }
 
-export async function getKey(userId: string): Promise<PgpUserEntry | null> {
+export async function getKey(userId: string) {
   const map = await loadUsersMap();
   return map[userId] ?? null;
 }
 
-export async function removeKey(userId: string): Promise<void> {
-  const map = await loadUsersMap();
-  delete map[userId];
-  await saveUsersMap(map);
-}
-
-export async function listKnownUsers(): Promise<PgpUserEntry[]> {
+export async function listKnownUsers() {
   const map = await loadUsersMap();
   return Object.values(map);
 }
 
-export async function touchLastSeenEncrypted(userId: string): Promise<void> {
-  const map = await loadUsersMap();
-  if (map[userId]) {
-    map[userId].lastSeenEncrypted = Date.now();
-  } else {
-    map[userId] = {
-      userId,
-      publicKeyArmored: "",
-      fingerprint: "",
-      addedAt: Date.now(),
-      lastSeenEncrypted: Date.now(),
-      autoEncryptEnabled: false,
-      trusted: false,
-    };
-  }
-  await saveUsersMap(map);
-}
-
-export async function setAutoEncryptEnabled(
-  userId: string,
-  enabled: boolean,
-): Promise<void> {
-  const map = await loadUsersMap();
-  if (map[userId]) {
-    map[userId].autoEncryptEnabled = enabled;
-    await saveUsersMap(map);
-  }
-}
-
-export async function saveOwnKeypair(
-  record: OwnKeypairRecord,
-): Promise<void> {
+export async function saveOwnKeypair(record: OwnKeypairRecord) {
   await DataStore.set(OWN_KEYPAIR_STORE_KEY, record);
 }
 
-export async function getOwnKeypair(): Promise<OwnKeypairRecord | null> {
+export async function getOwnKeypair() {
   return (
     (await DataStore.get<OwnKeypairRecord>(OWN_KEYPAIR_STORE_KEY)) ?? null
   );
-}
-
-export async function clearOwnKeypair(): Promise<void> {
-  await DataStore.del(OWN_KEYPAIR_STORE_KEY);
-}
-
-export interface PgpSettingsRecord {
-  autoEncryptDms: boolean;
-  autoDecrypt: boolean;
-  signMessages: boolean;
-  promptBeforeTrust: boolean;
-
-  // Added so unlock can work across restarts (depending on whether your
-  // settings system persists this).
-  passphrase: string;
-
-  // Added: auto-unlock once after restart if passphrase is present.
-  autoUnlockOnStart: boolean;
-}
-
-const DEFAULT_SETTINGS: PgpSettingsRecord = {
-  autoEncryptDms: true,
-  autoDecrypt: true,
-  signMessages: true,
-  promptBeforeTrust: true,
-  passphrase: "",
-  autoUnlockOnStart: false,
-};
-
-export async function getSettings(): Promise<PgpSettingsRecord> {
-  return (
-    (await DataStore.get<PgpSettingsRecord>(SETTINGS_STORE_KEY)) ??
-    DEFAULT_SETTINGS
-  );
-}
-
-export async function saveSettings(
-  settings: PgpSettingsRecord,
-): Promise<void> {
-  await DataStore.set(SETTINGS_STORE_KEY, settings);
 }

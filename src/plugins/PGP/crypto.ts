@@ -35,20 +35,70 @@ export async function unlockPrivateKey(
   const privateKey = await openpgp.readPrivateKey({
     armoredKey: privateKeyArmored,
   });
-  return openpgp.decryptKey({ privateKey, passphrase });
+
+  return openpgp.decryptKey({
+    privateKey,
+    passphrase,
+  });
 }
 
+const BEGIN_ARMOR = /-----BEGIN PGP (?:PUBLIC KEY|PRIVATE KEY|MESSAGE|SIGNATURE) BLOCK-----/;
+const END_ARMOR = /-----END PGP (?:PUBLIC KEY|PRIVATE KEY|MESSAGE|SIGNATURE) BLOCK-----/;
 
+export function normalizeArmoredText(text: string): string {
+  text = text
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+
+  const beginMatch = BEGIN_ARMOR.exec(text);
+  const endMatch = END_ARMOR.exec(text);
+
+  if (!beginMatch || !endMatch || endMatch.index <= beginMatch.index) {
+    return text;
+  }
+
+  const header = text.slice(beginMatch.index, beginMatch.index + beginMatch[0].length);
+  const footer = text.slice(endMatch.index, endMatch.index + endMatch[0].length);
+  const bodyArea = text.slice(beginMatch.index + beginMatch[0].length, endMatch.index);
+
+  if (bodyArea.includes("\n")) {
+    return text;
+  }
+
+  const base64Start = bodyArea.match(/[A-Za-z0-9+/]{20,}/);
+  let body = (base64Start ? bodyArea.slice(base64Start.index) : bodyArea)
+    .replace(/[^A-Za-z0-9+/=]/g, "");
+
+  if (body.length === 0) {
+    return text;
+  }
+
+  let checksum = "";
+  const eqIdx = body.lastIndexOf("=");
+  if (eqIdx !== -1 && body.length - eqIdx === 5) {
+    checksum = body.slice(eqIdx);
+    body = body.slice(0, eqIdx);
+  }
+
+  const lines: string[] = [];
+  for (let i = 0; i < body.length; i += 76) {
+    lines.push(body.slice(i, i + 76));
+  }
+
+  let result = header + "\n\n" + lines.join("\n");
+  if (checksum) {
+    result += "\n" + checksum;
+  }
+  result += "\n" + footer + "\n";
+  return result;
+}
 
 export async function parsePublicKey(armoredKey: string) {
-  try {
-    const key = await openpgp.readKey({ armoredKey });
-    if (!key.isPrivate()) return key;
-    return null;
-  } catch (err) {
-    console.error("[PGP] parsePublicKey failed:", err);
-    throw err;
-  }
+  const key = await openpgp.readKey({ armoredKey: normalizeArmoredText(armoredKey) });
+  if (!key.isPrivate()) return key;
+  return null;
 }
 
 export interface EncryptTextOptions {
@@ -63,12 +113,14 @@ export async function encryptText({
   signingKey,
 }: EncryptTextOptions): Promise<string> {
   const message = await openpgp.createMessage({ text });
+
   const encrypted = await openpgp.encrypt({
     message,
     encryptionKeys: recipientPublicKeys,
     signingKeys: signingKey ? [signingKey] : undefined,
     format: "armored",
   });
+
   return encrypted as string;
 }
 
@@ -77,55 +129,14 @@ export interface DecryptTextResult {
   verified: boolean | null;
   signedBy?: string;
 }
-export function normalizeArmoredKey(text: string): string {
-  let normalized = text.trim().replace(/\r\n?/g, "\n");
 
-  // Already has real newlines - nothing to repair.
-  if (normalized.includes("\n")) return normalized;
-
-  const beginMatch = normalized.match(
-    /-----BEGIN PGP (PUBLIC KEY BLOCK|PRIVATE KEY BLOCK|MESSAGE)-----/,
-  );
-  const endMatch = normalized.match(
-    /-----END PGP (PUBLIC KEY BLOCK|PRIVATE KEY BLOCK|MESSAGE)-----/,
-  );
-  if (!beginMatch || !endMatch) return normalized;
-
-  const header = beginMatch[0];
-  const footer = endMatch[0];
-
-  const bodyStart = beginMatch.index! + header.length;
-  const bodyEnd = endMatch.index!;
-  let body = normalized.slice(bodyStart, bodyEnd).trim();
-
-  // Body tokens were separated by spaces where newlines used to be.
-  // Rejoin all whitespace-separated chunks, then re-wrap at 64 chars,
-  // except keep the checksum line (starts with "=") on its own line.
-  const tokens = body.split(/\s+/).filter(Boolean);
-
-  let checksumToken: string | null = null;
-  if (tokens.length && tokens[tokens.length - 1].startsWith("=")) {
-    checksumToken = tokens.pop()!;
-  }
-
-  const joined = tokens.join("");
-  const lines: string[] = [];
-  for (let i = 0; i < joined.length; i += 64) {
-    lines.push(joined.slice(i, i + 64));
-  }
-
-  let rebuilt = `${header}\n\n${lines.join("\n")}`;
-  if (checksumToken) rebuilt += `\n${checksumToken}`;
-  rebuilt += `\n${footer}`;
-
-  return rebuilt;
-}
 export async function decryptText(
   armoredMessage: string,
   privateKey: openpgp.PrivateKey,
   verifyKeys: openpgp.Key[] = [],
 ): Promise<DecryptTextResult> {
-  const message = await openpgp.readMessage({ armoredMessage });
+  const message = await openpgp.readMessage({ armoredMessage: normalizeArmoredText(armoredMessage) });
+
   const { data, signatures } = await openpgp.decrypt({
     message,
     decryptionKeys: privateKey,
@@ -137,6 +148,7 @@ export async function decryptText(
 
   if (signatures?.length) {
     verified = false;
+
     for (const sig of signatures) {
       try {
         await sig.verified;
@@ -144,40 +156,16 @@ export async function decryptText(
         signedBy = sig.keyID.toHex();
         break;
       } catch {
-        // keep checking others
+        continue;
       }
     }
   }
 
-  return { data: data as string, verified, signedBy };
-}
-
-export async function encryptBinary(
-  bytes: Uint8Array,
-  recipientPublicKeys: openpgp.Key[],
-  signingKey?: openpgp.PrivateKey,
-): Promise<Uint8Array> {
-  const message = await openpgp.createMessage({ binary: bytes });
-  const encrypted = await openpgp.encrypt({
-    message,
-    encryptionKeys: recipientPublicKeys,
-    signingKeys: signingKey ? [signingKey] : undefined,
-    format: "binary",
-  });
-  return encrypted as Uint8Array;
-}
-
-export async function decryptBinary(
-  bytes: Uint8Array,
-  privateKey: openpgp.PrivateKey,
-): Promise<Uint8Array> {
-  const message = await openpgp.readMessage({ binaryMessage: bytes });
-  const { data } = await openpgp.decrypt({
-    message,
-    decryptionKeys: privateKey,
-    format: "binary",
-  });
-  return data as Uint8Array;
+  return {
+    data: data as string,
+    verified,
+    signedBy,
+  };
 }
 
 export function looksLikeArmoredPublicKey(text: string): boolean {

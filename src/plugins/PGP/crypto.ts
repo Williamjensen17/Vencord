@@ -13,7 +13,9 @@ export async function generateKeypair(
 ): Promise<GeneratedKeypair> {
   const { privateKey, publicKey } = await openpgp.generateKey({
     type: "ecc",
-    curve: "curve25519",
+    // openpgp v6 renamed this curve; "curve25519" is only a deprecated alias.
+    // The Legacy variant stays interoperable with standard GnuPG keys.
+    curve: "curve25519Legacy",
     userIDs: [{ name, email }],
     passphrase,
     format: "armored",

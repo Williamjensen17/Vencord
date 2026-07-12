@@ -7,6 +7,7 @@ import {
 import {
   ApplicationCommandOptionType,
   findOption,
+  sendBotMessage,
 } from "@api/Commands";
 import { ChannelStore } from "@webpack/common";
 import { createAndAppendStyle } from "@utils/css";
@@ -16,8 +17,6 @@ import {
   getOwnKeypair,
   listKnownUsers,
   saveOwnKeypair,
-  getSettings as keystoreGetSettings,
-  saveSettings as keystoreSaveSettings,
 } from "./keystore";
 
 import {
@@ -80,6 +79,15 @@ export default definePlugin({
   authors: [{ name: "William", id: 0n }],
   settings,
 
+  // Without these Vencord won't auto-enable the APIs, and the missing
+  // MessageEventsAPI silently skips outgoing encryption (messages send in
+  // plaintext with no warning).
+  dependencies: [
+    "MessageEventsAPI",
+    "MessageAccessoriesAPI",
+    "CommandsAPI",
+  ],
+
   patches: [
     {
       find: "Message must not be a thread starter message",
@@ -91,6 +99,66 @@ export default definePlugin({
   ],
 
   commands: [
+    // Create your keypair. Nothing else works until this has been run once.
+    {
+      name: "pgp-generate",
+      description:
+        "Generate your PGP keypair (uses the passphrase from plugin settings)",
+      options: [
+        {
+          name: "name",
+          description: "Identity name for the key (default: your Discord name)",
+          type: ApplicationCommandOptionType.STRING,
+          required: false,
+        },
+        {
+          name: "email",
+          description: "Identity email for the key (optional)",
+          type: ApplicationCommandOptionType.STRING,
+          required: false,
+        },
+      ],
+      execute: async (args, ctx) => {
+        try {
+          const passphrase = settings.store.passphrase;
+          if (!passphrase) {
+            return sendBotMessage(ctx.channel.id, {
+              content:
+                "❌ Set a **passphrase** in the PGP plugin settings first, then run this again.",
+            });
+          }
+
+          const existing = await getOwnKeypair();
+          if (existing) {
+            return sendBotMessage(ctx.channel.id, {
+              content:
+                `⚠️ You already have a keypair (fingerprint \`${existing.fingerprint}\`).\n` +
+                "Generating a new one would make messages encrypted to the old key unreadable, so this is a no-op.",
+            });
+          }
+
+          const name = findOption(args, "name", "Vencord PGP User");
+          const email = findOption(args, "email", "pgp@vencord.local");
+
+          await createAndUnlockNewKeypair(name, email, passphrase);
+          const record = await getOwnKeypair();
+
+          return sendBotMessage(ctx.channel.id, {
+            content:
+              "🔑 Keypair generated and unlocked for this session.\n" +
+              `Fingerprint: \`${record?.fingerprint}\`\n` +
+              "Next: run `/pgp-pubkey` in a DM to share your public key.",
+          });
+        } catch (err) {
+          return sendBotMessage(ctx.channel.id, {
+            content: `Error: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          });
+        }
+      },
+    },
+
     // ✅ SEND YOUR PUBLIC KEY
     {
       name: "pgp-pubkey",
@@ -211,7 +279,10 @@ export default definePlugin({
         display: none !important;
       }
       .vc-pgp-decrypted {
-        color: #dbdee1 !important;
+        /* Follow Discord's own text color instead of a hardcoded dark-theme
+           hex, so custom themes and light mode render correctly.
+           --text-default is current Discord; --text-normal is the legacy name. */
+        color: var(--text-default, var(--text-normal, inherit)) !important;
       }
     `;
 

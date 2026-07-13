@@ -19,6 +19,13 @@ export interface LinkMetadata {
   imageHeight?: number;
   /** The site's own theme-color, used for the embed's left bar like Discord does. */
   color?: string;
+  /**
+   * Set when the URL *is* the media (a direct .gif/.png/.mp4 link) rather than a
+   * page describing it. Discord renders these inline; there is no OpenGraph here
+   * to scrape, so we inline the bytes instead.
+   */
+  mediaKind?: "image" | "video";
+  media?: string;
 }
 
 // What Discord's own scraper sends. Plenty of sites (GitHub included) only serve
@@ -29,6 +36,9 @@ const USER_AGENT = "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp
 // the end and capping there just meant no embed at all; we stop at </head>.
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+// A linked gif/video is the content itself, not a thumbnail, so it gets more
+// headroom — but it still becomes a data: URI, so it cannot be unbounded.
+const MAX_MEDIA_BYTES = 16 * 1024 * 1024;
 const TIMEOUT_MS = 6000;
 const MAX_REDIRECTS = 3;
 
@@ -218,10 +228,27 @@ export async function fetchLinkMetadata(
   rawUrl: string,
 ): Promise<LinkMetadata | null> {
   try {
-    const res = await safeFetch(rawUrl, "text/html,application/xhtml+xml");
+    const res = await safeFetch(
+      rawUrl,
+      "text/html,application/xhtml+xml,image/*,video/*;q=0.8,*/*;q=0.5",
+    );
     if (!res.ok) return null;
 
     const type = res.headers.get("content-type") ?? "";
+    const mime = type.split(";")[0].trim();
+
+    // The URL points straight at the media. There is no page to scrape — inline
+    // the bytes and let the renderer show it, the way Discord shows a linked gif.
+    if (mime.startsWith("image/") || mime.startsWith("video/")) {
+      const buf = await readCapped(res, MAX_MEDIA_BYTES);
+
+      return {
+        url: rawUrl,
+        mediaKind: mime.startsWith("image/") ? "image" : "video",
+        media: `data:${mime};base64,${buf.toString("base64")}`,
+      };
+    }
+
     if (!type.includes("html")) return null;
 
     const html = await readHead(res, MAX_HTML_BYTES);

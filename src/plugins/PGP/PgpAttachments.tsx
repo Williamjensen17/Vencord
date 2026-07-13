@@ -1,6 +1,7 @@
-import { openImageModal } from "@utils/discord";
 import { PluginNative } from "@utils/types";
 import { ContextMenuApi, FluxDispatcher, Menu, React } from "@webpack/common";
+
+import { openPgpLightbox } from "./lightbox";
 
 import { decryptFile, parsePublicKey } from "./crypto";
 import { getKey, getOwnKeypair } from "./keystore";
@@ -290,19 +291,7 @@ function One({ attachment, senderId }: { attachment: PgpAttachment; senderId: st
           src={state.src}
           alt={state.filename}
           onContextMenu={onContextMenu}
-          // Discord's real lightbox — zoom, pan, escape-to-close — takes a plain
-          // url, so a blob: works and we get the whole thing for free. It does
-          // insist on dimensions, hence reading them off the decoded image.
-          onClick={e => {
-            const img = e.currentTarget;
-            openImageModal({
-              url: state.src,
-              original: state.src,
-              width: img.naturalWidth,
-              height: img.naturalHeight,
-              alt: state.filename,
-            });
-          }}
+          onClick={() => openPgpLightbox(state.src, state.filename)}
         />
       </div>
     );

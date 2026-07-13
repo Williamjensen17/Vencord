@@ -380,6 +380,17 @@ export default definePlugin({
         max-width: 100%;
         border-radius: 4px;
       }
+      /* A directly-linked gif/image/video: bare and inline, no card. */
+      .vc-pgp-embed-media {
+        display: block;
+        max-width: 400px;
+        max-height: 350px;
+        margin-top: 0.25rem;
+        border-radius: 4px;
+      }
+      .vc-pgp-embed-media--image {
+        cursor: zoom-in;
+      }
       /* Thumbnail doubling as the play button, the way Discord's video embeds do. */
       .vc-pgp-embed-thumb-button {
         position: relative;
@@ -433,6 +444,20 @@ export default definePlugin({
       }
       .vc-pgp-attachment-image {
         cursor: zoom-in;
+      }
+      /* Strip the modal chrome so only the image floats on the backdrop. */
+      .vc-pgp-lightbox {
+        background: transparent !important;
+        box-shadow: none !important;
+        border: none !important;
+        overflow: visible !important;
+      }
+      .vc-pgp-lightbox-image {
+        display: block;
+        max-width: 90vw;
+        max-height: 90vh;
+        border-radius: 4px;
+        cursor: zoom-out;
       }
       .vc-pgp-attachment-file {
         display: inline-flex;

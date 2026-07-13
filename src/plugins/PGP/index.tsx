@@ -1,4 +1,5 @@
 import definePlugin from "@utils/types";
+import ErrorBoundary from "@components/ErrorBoundary";
 import {
   addMessageAccessory,
   removeMessageAccessory,
@@ -36,7 +37,12 @@ import {
 } from "./outgoing";
 
 import { PgpDecryptedAccessory } from "./PgpDecryptedAccessory";
+import { PgpAttachments } from "./PgpAttachments";
 import { settings } from "./settings";
+import {
+  registerUploadEncryption,
+  unregisterUploadEncryption,
+} from "./upload";
 
 let pgpStyle: HTMLStyleElement;
 
@@ -56,15 +62,12 @@ export default definePlugin({
     "CommandsAPI",
   ],
 
-  patches: [
-    {
-      find: "Message must not be a thread starter message",
-      replacement: {
-        match: /\)\("li",\{(.+?),className:/,
-        replace: ")(\"li\",{$1,className:(arguments[0].message?.content?.includes(\"-----BEGIN PGP MESSAGE-----\")?\"vc-pgp-encrypted \":\"\")+"
-      },
-    },
-  ],
+  // No patches. The message row used to be tagged by patching
+  // "Message must not be a thread starter message", but Discord changed that
+  // code — stock MessageLogger fails on the identical string — and the class
+  // silently stopped being applied, un-hiding the raw ciphertext. The accessories
+  // now tag their own row via useTagMessageRow(), which depends on nothing
+  // minified.
 
   commands: [
     // Create your keypair. Nothing else works until this has been run once.
@@ -408,9 +411,49 @@ export default definePlugin({
       .vc-pgp-embed-thumb-button:hover .vc-pgp-embed-play {
         background: rgba(0, 0, 0, 0.85);
       }
+      /* Hide the opaque .pgp blob Discord renders; our accessory draws the real
+         file in its place. The :not() is load-bearing — our own decrypted media
+         lives in .vc-pgp-attachment*, which would otherwise match this selector
+         and hide the very thing we are trying to show. */
+      .vc-pgp-has-encrypted-file [class*="attachment" i]:not([class*="vc-pgp"]),
+      .vc-pgp-has-encrypted-file [class*="mediaItem" i]:not([class*="vc-pgp"]) {
+        display: none !important;
+      }
+      .vc-pgp-attachments {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.25rem;
+        margin-top: 0.25rem;
+      }
+      .vc-pgp-attachment-media {
+        max-width: 400px;
+        max-height: 350px;
+        border-radius: 4px;
+      }
+      .vc-pgp-attachment-file {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        max-width: 432px;
+        padding: 0.625rem 0.75rem;
+        border: 1px solid var(--background-modifier-accent, rgba(128, 128, 128, 0.3));
+        border-radius: 4px;
+        background: var(--background-secondary, rgba(128, 128, 128, 0.1));
+        color: var(--text-link, #00a8fc);
+        font-size: 0.875rem;
+      }
+      .vc-pgp-attachment-file:hover {
+        text-decoration: underline;
+      }
+      .vc-pgp-attachment-size {
+        color: var(--text-muted, inherit);
+        font-size: 0.75rem;
+      }
     `;
 
     registerOutgoingEncryption();
+    registerUploadEncryption();
 
     // The unlocked key only ever lives in memory, so a client restart always
     // comes back locked. Without this the setting was declared but never read.
@@ -432,13 +475,32 @@ export default definePlugin({
       );
     });
 
-    console.log("[PGP] Encryption is ENABLED by default.");
+    addMessageAccessory("pgp-decrypted-attachments", props => {
+      const message = props.message;
+
+      const encrypted = (message?.attachments ?? []).filter(
+        (a: any) => a?.filename?.endsWith(".pgp"),
+      );
+      if (!encrypted.length) return null;
+
+      // A failed attachment must never blank the message it sits under.
+      return (
+        <ErrorBoundary noop>
+          <PgpAttachments
+            attachments={encrypted}
+            senderId={message.author.id}
+          />
+        </ErrorBoundary>
+      );
+    });
   },
 
   stop() {
     pgpStyle?.remove();
     lockSession();
     unregisterOutgoingEncryption();
+    unregisterUploadEncryption();
     removeMessageAccessory("pgp-decrypted-content");
+    removeMessageAccessory("pgp-decrypted-attachments");
   },
 });

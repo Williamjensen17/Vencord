@@ -4,6 +4,7 @@ import { tryDecryptMessage } from "./messageDecrypt";
 import { PgpEmbeds } from "./PgpEmbeds";
 import { getSessionGeneration, subscribeToSession } from "./session";
 import { settings } from "./settings";
+import { useTagMessageRow } from "./useTagMessageRow";
 
 // currentColor keeps these monochrome and following the theme, the way Discord's
 // own inline markers do.
@@ -42,12 +43,14 @@ export function PgpDecryptedAccessory({
     getSessionGeneration,
   );
 
-  // Must stay above the early returns — it is a hook.
+  // Must stay above the early returns — they are hooks.
   const { linkEmbeds: embedMode, lockIconColor, warningIconColor } = settings.use([
     "linkEmbeds",
     "lockIconColor",
     "warningIconColor",
   ]);
+
+  const rowRef = useTagMessageRow<HTMLDivElement>("vc-pgp-encrypted");
 
   React.useEffect(() => {
     // Guards against a slow decrypt from a previous generation landing after a
@@ -78,7 +81,7 @@ export function PgpDecryptedAccessory({
 
   if (state.status === "loading") {
     return (
-      <div className="vc-pgp-decrypted vc-pgp-notice">
+      <div className="vc-pgp-decrypted vc-pgp-notice" ref={rowRef}>
         <LockIcon /> Decrypting…
       </div>
     );
@@ -86,7 +89,7 @@ export function PgpDecryptedAccessory({
 
   if (state.status === "error") {
     return (
-      <div className="vc-pgp-decrypted vc-pgp-notice">
+      <div className="vc-pgp-decrypted vc-pgp-notice" ref={rowRef}>
         <LockIcon /> {state.error}
       </div>
     );
@@ -99,7 +102,7 @@ export function PgpDecryptedAccessory({
   const badgeColor = tampered ? warningIconColor : lockIconColor;
 
   return (
-    <div className="vc-pgp-decrypted">
+    <div className="vc-pgp-decrypted" ref={rowRef}>
       {/* Run it through Discord's own markdown parser, or the plaintext lands as
           a bare text node and links, mentions and emoji stay dead. */}
       {Parser.parse(state.plaintext)}

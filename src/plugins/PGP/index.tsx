@@ -1,5 +1,4 @@
-import definePlugin, { OptionType } from "@utils/types";
-import { definePluginSettings } from "@api/Settings";
+import definePlugin from "@utils/types";
 import {
   addMessageAccessory,
   removeMessageAccessory,
@@ -37,41 +36,9 @@ import {
 } from "./outgoing";
 
 import { PgpDecryptedAccessory } from "./PgpDecryptedAccessory";
+import { settings } from "./settings";
 
 let pgpStyle: HTMLStyleElement;
-
-const settings = definePluginSettings({
-  autoEncryptDms: {
-    type: OptionType.BOOLEAN,
-    default: true,
-    description: "Automatically encrypt outgoing DMs to known PGP users",
-  },
-  autoDecrypt: {
-    type: OptionType.BOOLEAN,
-    default: true,
-    description: "Automatically decrypt incoming PGP messages",
-  },
-  signMessages: {
-    type: OptionType.BOOLEAN,
-    default: true,
-    description: "Sign outgoing encrypted messages",
-  },
-  promptBeforeTrust: {
-    type: OptionType.BOOLEAN,
-    default: true,
-    description: "Prompt before trusting new public keys",
-  },
-  passphrase: {
-    type: OptionType.STRING,
-    default: "",
-    description: "Session passphrase for unlocking private key",
-  },
-  autoUnlockOnStart: {
-    type: OptionType.BOOLEAN,
-    default: false,
-    description: "Auto-unlock on startup",
-  },
-});
 
 export default definePlugin({
   name: "PGP",
@@ -307,6 +274,139 @@ export default definePlugin({
            hex, so custom themes and light mode render correctly.
            --text-default is current Discord; --text-normal is the legacy name. */
         color: var(--text-default, var(--text-normal, inherit)) !important;
+        white-space: pre-wrap;
+      }
+      /* Trailing marker, styled after Discord's own "(edited)": quiet enough to
+         ignore while reading, there when you look for it. */
+      .vc-pgp-badge {
+        display: inline-flex;
+        align-items: center;
+        margin-left: 0.25rem;
+        vertical-align: -1px;
+        color: var(--text-muted, var(--text-normal, inherit));
+        opacity: 0.45;
+        cursor: default;
+        transition: opacity 0.1s ease;
+      }
+      .vc-pgp-badge:hover {
+        opacity: 1;
+      }
+      /* An invalid signature is not something to be subtle about. */
+      .vc-pgp-badge--warn {
+        color: var(--text-danger, var(--status-danger, currentColor));
+        opacity: 1;
+      }
+      /* A colour was picked deliberately in settings, so stop dimming it. */
+      .vc-pgp-badge--custom {
+        opacity: 0.9;
+      }
+      .vc-pgp-notice {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        color: var(--text-muted, var(--text-normal, inherit)) !important;
+        font-size: 0.875rem;
+      }
+      .vc-pgp-embeds {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.25rem;
+        margin-top: 0.25rem;
+      }
+      .vc-pgp-embed-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.25rem 0.5rem;
+        border: 1px solid var(--background-modifier-accent, rgba(128, 128, 128, 0.3));
+        border-radius: 4px;
+        background: none;
+        color: var(--text-muted, var(--text-normal, inherit));
+        font-size: 0.8125rem;
+        cursor: pointer;
+        transition: color 0.1s ease, border-color 0.1s ease;
+      }
+      .vc-pgp-embed-chip:hover {
+        color: var(--text-default, var(--text-normal, inherit));
+        border-color: var(--text-muted, rgba(128, 128, 128, 0.6));
+      }
+      .vc-pgp-embed-frame {
+        border: 0;
+        border-radius: 4px;
+        width: 100%;
+        max-width: 400px;
+        margin-top: 0.5rem;
+      }
+      /* Mirrors Discord's own embed: left accent bar, muted panel, 432px cap. */
+      .vc-pgp-embed {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        max-width: 432px;
+        margin-top: 0.5rem;
+        padding: 0.5rem 1rem 1rem 0.75rem;
+        border-left: 4px solid var(--background-modifier-accent, rgba(128, 128, 128, 0.4));
+        border-radius: 4px;
+        background: var(--background-secondary, rgba(128, 128, 128, 0.1));
+      }
+      .vc-pgp-embed-provider {
+        margin-top: 0.5rem;
+        color: var(--text-muted, inherit);
+        font-size: 0.75rem;
+      }
+      .vc-pgp-embed-title {
+        margin-top: 0.5rem;
+        color: var(--text-link, #00a8fc);
+        font-size: 1rem;
+        font-weight: 600;
+        line-height: 1.375rem;
+      }
+      .vc-pgp-embed-title:hover {
+        text-decoration: underline;
+      }
+      .vc-pgp-embed-description {
+        margin-top: 0.5rem;
+        color: var(--text-muted, inherit);
+        font-size: 0.875rem;
+        line-height: 1.125rem;
+        white-space: pre-wrap;
+      }
+      .vc-pgp-embed-image {
+        margin-top: 0.5rem;
+        max-width: 100%;
+        border-radius: 4px;
+      }
+      /* Thumbnail doubling as the play button, the way Discord's video embeds do. */
+      .vc-pgp-embed-thumb-button {
+        position: relative;
+        display: block;
+        padding: 0;
+        border: 0;
+        background: none;
+        cursor: pointer;
+      }
+      .vc-pgp-embed-play {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 3rem;
+        height: 3rem;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.65);
+        color: #fff;
+      }
+      .vc-pgp-embed-play svg {
+        width: 20px;
+        height: 20px;
+        margin-left: 2px;
+      }
+      .vc-pgp-embed-thumb-button:hover .vc-pgp-embed-play {
+        background: rgba(0, 0, 0, 0.85);
       }
     `;
 

@@ -149,9 +149,16 @@ export async function decryptText(
   let signedBy: string | undefined;
 
   if (signatures?.length) {
-    verified = false;
-
     for (const sig of signatures) {
+      // Only judge a signature we actually hold the signer's key for. Asking
+      // merely whether verifyKeys is non-empty is not enough: our own key is
+      // always in there, so a sender's key we happen to be missing would take
+      // the "assume invalid" path below and be reported as forged. Unknown is
+      // not the same as tampered, and must never be shown as such.
+      if (!verifyKeys.some(key => key.getKeys(sig.keyID).length > 0)) continue;
+
+      verified = false;
+
       try {
         await sig.verified;
         verified = true;

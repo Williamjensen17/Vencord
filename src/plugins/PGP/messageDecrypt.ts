@@ -2,7 +2,7 @@ import type { Key } from "openpgp";
 
 import { decryptText, parsePublicKey } from "./crypto";
 import { getUnlockedPrivateKey, isUnlocked } from "./session";
-import { getKey } from "./keystore";
+import { getKey, getOwnKeypair } from "./keystore";
 
 export async function tryDecryptMessage(
   content: string,
@@ -30,6 +30,15 @@ export async function tryDecryptMessage(
         senderEntry.publicKeyArmored,
       );
       if (pub) verifyKeys.push(pub);
+    }
+
+    // Our own sent messages are signed with our own key, and we are not in our
+    // own contact keystore — so without this there is never a key to verify them
+    // against and they can never show as verified.
+    const ownKeypair = await getOwnKeypair();
+    if (ownKeypair?.publicKeyArmored) {
+      const ownPub = await parsePublicKey(ownKeypair.publicKeyArmored);
+      if (ownPub) verifyKeys.push(ownPub);
     }
 
     const result = await decryptText(

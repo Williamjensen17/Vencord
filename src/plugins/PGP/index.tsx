@@ -27,6 +27,7 @@ import {
   createAndUnlockNewKeypair,
 } from "./session";
 
+import { changePassphrase } from "./crypto";
 import { getOwnPublicKeyArmored, importFriendPublicKey } from "./keyExchange";
 
 import {
@@ -226,6 +227,78 @@ export default definePlugin({
         return sendBotMessage(ctx.channel.id, {
           content: "🔒 Private key locked. Run `/pgp-unlock` to read encrypted messages again.",
         });
+      },
+    },
+
+    // ✅ CHANGE PASSPHRASE
+    // Safe: the passphrase only protects the private key at rest. Messages are
+    // encrypted to the public key, which does not change — so nothing already
+    // sent or received becomes unreadable, and the other side is unaffected.
+    {
+      name: "pgp-passphrase",
+      description: "Change the passphrase protecting your private key",
+      inputType: ApplicationCommandInputType.BUILT_IN,
+      options: [
+        {
+          name: "new",
+          description: "The new passphrase",
+          type: ApplicationCommandOptionType.STRING,
+          required: true,
+        },
+        {
+          name: "old",
+          description: "Current passphrase (defaults to the one in settings)",
+          type: ApplicationCommandOptionType.STRING,
+          required: false,
+        },
+      ],
+      execute: async (args, ctx) => {
+        try {
+          const next = findOption(args, "new", "");
+          const current = findOption(args, "old", "") || settings.store.passphrase;
+
+          if (!next) {
+            return sendBotMessage(ctx.channel.id, {
+              content: "❌ The new passphrase cannot be empty.",
+            });
+          }
+
+          const record = await getOwnKeypair();
+          if (!record) {
+            return sendBotMessage(ctx.channel.id, {
+              content: "❌ You have no keypair yet. Run `/pgp-generate` first.",
+            });
+          }
+
+          // Throws on a wrong old passphrase, before anything is written.
+          const reArmored = await changePassphrase(
+            record.privateKeyArmored,
+            current,
+            next,
+          );
+
+          // Order matters. The key must be saved before the stored passphrase is
+          // updated: if this were the other way round and the write failed, the
+          // settings would hold a passphrase that does not open the stored key.
+          await saveOwnKeypair({ ...record, privateKeyArmored: reArmored });
+          settings.store.passphrase = next;
+
+          // The in-memory key is already unlocked and unchanged, so the session
+          // keeps working. Re-unlock anyway so state cannot drift.
+          await unlockSession(next);
+
+          return sendBotMessage(ctx.channel.id, {
+            content:
+              "🔑 Passphrase changed.\n" +
+              "Your key is unchanged, so every message and file you have already sent or received stays readable, and your friend does not need to do anything.",
+          });
+        } catch {
+          return sendBotMessage(ctx.channel.id, {
+            content:
+              "❌ Wrong current passphrase — nothing was changed.\n" +
+              "Pass the correct one explicitly: `/pgp-passphrase new:<new> old:<current>`",
+          });
+        }
       },
     },
 

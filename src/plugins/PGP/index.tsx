@@ -431,6 +431,9 @@ export default definePlugin({
         max-height: 350px;
         border-radius: 4px;
       }
+      .vc-pgp-attachment-image {
+        cursor: zoom-in;
+      }
       .vc-pgp-attachment-file {
         display: inline-flex;
         align-items: center;

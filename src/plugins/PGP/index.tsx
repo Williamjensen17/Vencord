@@ -447,9 +447,11 @@ export default definePlugin({
       }
       /* Strip the modal chrome so only the image floats on the backdrop. */
       .vc-pgp-lightbox {
+        position: relative;
         background: transparent !important;
         box-shadow: none !important;
         border: none !important;
+        /* Must stay visible: the toolbar is positioned above the image. */
         overflow: visible !important;
       }
       .vc-pgp-lightbox-image {
@@ -458,6 +460,31 @@ export default definePlugin({
         max-height: 90vh;
         border-radius: 4px;
         cursor: zoom-out;
+      }
+      /* Toolbar in the corner, where Discord puts its own. */
+      .vc-pgp-lightbox-actions {
+        position: absolute;
+        top: -2.75rem;
+        right: 0;
+        display: flex;
+        gap: 0.25rem;
+      }
+      .vc-pgp-lightbox-action {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.5);
+        color: #fff;
+        cursor: pointer;
+        transition: background 0.1s ease;
+      }
+      .vc-pgp-lightbox-action:hover {
+        background: rgba(0, 0, 0, 0.8);
       }
       .vc-pgp-attachment-file {
         display: inline-flex;

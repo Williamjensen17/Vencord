@@ -25,7 +25,12 @@ export const settings = definePluginSettings({
   passphrase: {
     type: OptionType.STRING,
     default: "",
-    description: "Session passphrase for unlocking private key (stored in plain text on disk)",
+    // Editing this field does not re-encrypt the key — it only changes what we
+    // try to unlock it with, so a stray edit just makes unlocking fail. Use
+    // /pgp-passphrase, which re-encrypts the key and updates this together.
+    description:
+      "Passphrase used to unlock your private key (stored in plain text on disk). " +
+      "To CHANGE your passphrase use /pgp-passphrase — editing this box does not re-encrypt your key, it will just stop unlocking it.",
   },
   autoUnlockOnStart: {
     type: OptionType.BOOLEAN,

@@ -44,6 +44,36 @@ export async function unlockPrivateKey(
   });
 }
 
+/**
+ * Re-encrypts the private key under a new passphrase.
+ *
+ * Safe by construction: the passphrase only protects the private key at rest.
+ * Messages are encrypted to the *public* key, which is untouched here — so no
+ * existing message or file becomes unreadable, and the other side never needs to
+ * know. (Regenerating the keypair is the operation that would destroy history.)
+ *
+ * Throws if the old passphrase is wrong, before anything is written.
+ */
+export async function changePassphrase(
+  privateKeyArmored: string,
+  oldPassphrase: string,
+  newPassphrase: string,
+): Promise<string> {
+  const locked = await openpgp.readPrivateKey({ armoredKey: privateKeyArmored });
+
+  const unlocked = await openpgp.decryptKey({
+    privateKey: locked,
+    passphrase: oldPassphrase,
+  });
+
+  const relocked = await openpgp.encryptKey({
+    privateKey: unlocked,
+    passphrase: newPassphrase,
+  });
+
+  return relocked.armor();
+}
+
 const BEGIN_ARMOR = /-----BEGIN PGP (?:PUBLIC KEY|PRIVATE KEY|MESSAGE|SIGNATURE) BLOCK-----/;
 const END_ARMOR = /-----END PGP (?:PUBLIC KEY|PRIVATE KEY|MESSAGE|SIGNATURE) BLOCK-----/;
 

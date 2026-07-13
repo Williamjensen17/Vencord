@@ -132,6 +132,36 @@ export interface DecryptTextResult {
   signedBy?: string;
 }
 
+/**
+ * Shared by text and files so the two can never drift apart on something this
+ * sensitive.
+ */
+async function resolveVerified(
+  signatures: Awaited<ReturnType<typeof openpgp.decrypt>>["signatures"],
+  verifyKeys: openpgp.Key[],
+): Promise<{ verified: boolean | null; signedBy?: string; }> {
+  if (!signatures?.length) return { verified: null };
+
+  for (const sig of signatures) {
+    // Only judge a signature we actually hold the signer's key for. Asking
+    // merely whether verifyKeys is non-empty is not enough: our own key is
+    // always in there, so a sender's key we happen to be missing would take
+    // the "assume invalid" path below and be reported as forged. Unknown is
+    // not the same as tampered, and must never be shown as such.
+    if (!verifyKeys.some(key => key.getKeys(sig.keyID).length > 0)) continue;
+
+    try {
+      await sig.verified;
+      return { verified: true, signedBy: sig.keyID.toHex() };
+    } catch {
+      // We held the right key and it still failed: genuinely bad.
+      return { verified: false };
+    }
+  }
+
+  return { verified: null };
+}
+
 export async function decryptText(
   armoredMessage: string,
   privateKey: openpgp.PrivateKey,
@@ -145,33 +175,74 @@ export async function decryptText(
     verificationKeys: verifyKeys.length ? verifyKeys : undefined,
   });
 
-  let verified: boolean | null = null;
-  let signedBy: string | undefined;
-
-  if (signatures?.length) {
-    for (const sig of signatures) {
-      // Only judge a signature we actually hold the signer's key for. Asking
-      // merely whether verifyKeys is non-empty is not enough: our own key is
-      // always in there, so a sender's key we happen to be missing would take
-      // the "assume invalid" path below and be reported as forged. Unknown is
-      // not the same as tampered, and must never be shown as such.
-      if (!verifyKeys.some(key => key.getKeys(sig.keyID).length > 0)) continue;
-
-      verified = false;
-
-      try {
-        await sig.verified;
-        verified = true;
-        signedBy = sig.keyID.toHex();
-        break;
-      } catch {
-        continue;
-      }
-    }
-  }
+  const { verified, signedBy } = await resolveVerified(signatures, verifyKeys);
 
   return {
     data: data as string,
+    verified,
+    signedBy,
+  };
+}
+
+export interface EncryptFileOptions {
+  bytes: Uint8Array;
+  filename: string;
+  recipientPublicKeys: openpgp.Key[];
+  signingKey?: openpgp.PrivateKey;
+}
+
+/**
+ * Binary, never armored. Armor is base64: it inflates a file by ~33%, which
+ * would push a 9MB video past Discord's 10MB limit as a pure encoding artifact.
+ *
+ * The real filename rides inside OpenPGP's literal-data packet, so it is
+ * encrypted and signed along with the contents — Discord only ever sees the
+ * opaque name we upload under.
+ */
+export async function encryptFile({
+  bytes,
+  filename,
+  recipientPublicKeys,
+  signingKey,
+}: EncryptFileOptions): Promise<Uint8Array> {
+  const message = await openpgp.createMessage({ binary: bytes, filename });
+
+  const encrypted = await openpgp.encrypt({
+    message,
+    encryptionKeys: recipientPublicKeys,
+    signingKeys: signingKey ? [signingKey] : undefined,
+    format: "binary",
+  });
+
+  return encrypted as Uint8Array;
+}
+
+export interface DecryptFileResult {
+  bytes: Uint8Array;
+  filename: string;
+  verified: boolean | null;
+  signedBy?: string;
+}
+
+export async function decryptFile(
+  ciphertext: Uint8Array,
+  privateKey: openpgp.PrivateKey,
+  verifyKeys: openpgp.Key[] = [],
+): Promise<DecryptFileResult> {
+  const message = await openpgp.readMessage({ binaryMessage: ciphertext });
+
+  const { data, signatures, filename } = await openpgp.decrypt({
+    message,
+    decryptionKeys: privateKey,
+    verificationKeys: verifyKeys.length ? verifyKeys : undefined,
+    format: "binary",
+  });
+
+  const { verified, signedBy } = await resolveVerified(signatures, verifyKeys);
+
+  return {
+    bytes: data as Uint8Array,
+    filename,
     verified,
     signedBy,
   };

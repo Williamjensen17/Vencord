@@ -180,6 +180,39 @@ async function fetchImageAsDataUri(src: string): Promise<string | undefined> {
   }
 }
 
+const ATTACHMENT_HOSTS = new Set([
+  "cdn.discordapp.com",
+  "media.discordapp.net",
+]);
+
+/**
+ * CORS fallback for pulling encrypted attachments off Discord's CDN. Restricted
+ * to Discord's own hosts so this cannot be used as a general-purpose fetcher by
+ * anything that gets a URL into it.
+ *
+ * Returns base64 — IPC cannot carry a Uint8Array.
+ */
+export async function fetchAttachment(
+  _: IpcMainInvokeEvent,
+  rawUrl: string,
+): Promise<string | null> {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== "https:" || !ATTACHMENT_HOSTS.has(url.hostname)) return null;
+
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(30_000),
+      headers: { "user-agent": USER_AGENT },
+    });
+    if (!res.ok) return null;
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf.toString("base64");
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchLinkMetadata(
   _: IpcMainInvokeEvent,
   rawUrl: string,

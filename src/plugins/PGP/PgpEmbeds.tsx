@@ -1,6 +1,8 @@
 import { React } from "@webpack/common";
 import { PluginNative } from "@utils/types";
 
+import { openPgpLightbox } from "./lightbox";
+import { openMediaMenu } from "./mediaActions";
 import type { LinkMetadata } from "./native";
 
 // Undefined when the main process predates this plugin's native.ts — i.e. Vesktop
@@ -130,6 +132,36 @@ function LinkEmbed({ url, autoLoad }: { url: string; autoLoad: boolean; }) {
   }
 
   if (!meta) return null;
+
+  // A direct link to a gif/image/video. Discord renders these bare and inline,
+  // with no embed card around them, so we do the same.
+  if (meta.mediaKind && meta.media) {
+    const name = decodeURIComponent(
+      new URL(url).pathname.split("/").pop() || "media",
+    );
+
+    if (meta.mediaKind === "video") {
+      return (
+        <video
+          className="vc-pgp-embed-media"
+          src={meta.media}
+          controls
+          loop
+          onContextMenu={e => openMediaMenu(e, meta.media!, name, "video")}
+        />
+      );
+    }
+
+    return (
+      <img
+        className="vc-pgp-embed-media vc-pgp-embed-media--image"
+        src={meta.media}
+        alt=""
+        onContextMenu={e => openMediaMenu(e, meta.media!, name, "image")}
+        onClick={() => openPgpLightbox(meta.media!, name)}
+      />
+    );
+  }
 
   return (
     <div

@@ -1,6 +1,8 @@
-import { openImageModal } from "@utils/discord";
 import { PluginNative } from "@utils/types";
-import { ContextMenuApi, FluxDispatcher, Menu, React } from "@webpack/common";
+import { React } from "@webpack/common";
+
+import { openPgpLightbox } from "./lightbox";
+import { openMediaMenu } from "./mediaActions";
 
 import { decryptFile, parsePublicKey } from "./crypto";
 import { getKey, getOwnKeypair } from "./keystore";
@@ -24,8 +26,6 @@ type State =
   | {
     status: "ready";
     src: string;
-    /** Kept for the clipboard — you cannot copy an image from a URL alone. */
-    blob: Blob;
     filename: string;
     kind: "image" | "video" | "audio" | "file";
     verified: boolean | null;
@@ -91,86 +91,6 @@ async function fetchCiphertext(url: string): Promise<Uint8Array> {
   }
 }
 
-function save(src: string, filename: string) {
-  const a = document.createElement("a");
-  a.href = src;
-  a.download = filename;
-  a.click();
-}
-
-/** Chromium's clipboard only accepts PNG for images, so anything else is re-encoded. */
-async function toPng(blob: Blob): Promise<Blob> {
-  if (blob.type === "image/png") return blob;
-
-  const url = URL.createObjectURL(blob);
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error("could not decode image"));
-      el.src = url;
-    });
-
-    const canvas = document.createElement("canvas");
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    canvas.getContext("2d")!.drawImage(img, 0, 0);
-
-    return await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        b => b ? resolve(b) : reject(new Error("could not encode PNG")),
-        "image/png",
-      );
-    });
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-async function copyImage(blob: Blob) {
-  await navigator.clipboard.write([
-    new ClipboardItem({ "image/png": await toPng(blob) }),
-  ]);
-}
-
-function MediaMenu({
-  src,
-  blob,
-  filename,
-  kind,
-}: {
-  src: string;
-  blob: Blob;
-  filename: string;
-  kind: "image" | "video" | "audio" | "file";
-}) {
-  return (
-    <Menu.Menu
-      navId="vc-pgp-media"
-      onClose={() => FluxDispatcher.dispatch({ type: "CONTEXT_MENU_CLOSE" })}
-      aria-label="Encrypted attachment"
-    >
-      {kind === "image" && (
-        <Menu.MenuItem
-          id="vc-pgp-copy-image"
-          label="Copy Image"
-          action={() => copyImage(blob)}
-        />
-      )}
-      <Menu.MenuItem
-        id="vc-pgp-save"
-        label={`Save ${kind === "image" ? "Image" : kind === "video" ? "Video" : "File"}`}
-        action={() => save(src, filename)}
-      />
-      <Menu.MenuItem
-        id="vc-pgp-copy-name"
-        label="Copy File Name"
-        action={() => navigator.clipboard.writeText(filename)}
-      />
-    </Menu.Menu>
-  );
-}
-
 function LockIcon() {
   return (
     <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
@@ -224,7 +144,6 @@ function One({ attachment, senderId }: { attachment: PgpAttachment; senderId: st
         setState({
           status: "ready",
           src: objectUrl,
-          blob,
           filename,
           kind: classify(filename),
           verified: result.verified,
@@ -269,18 +188,8 @@ function One({ attachment, senderId }: { attachment: PgpAttachment; senderId: st
       ? "Decrypted — signature verified"
       : "Decrypted — not signed";
 
-  const onContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    ContextMenuApi.openContextMenu(e, () => (
-      <MediaMenu
-        src={state.src}
-        blob={state.blob}
-        filename={state.filename}
-        kind={state.kind}
-      />
-    ));
-  };
+  const onContextMenu = (e: React.MouseEvent) =>
+    openMediaMenu(e, state.src, state.filename, state.kind);
 
   if (state.kind === "image") {
     return (
@@ -290,19 +199,7 @@ function One({ attachment, senderId }: { attachment: PgpAttachment; senderId: st
           src={state.src}
           alt={state.filename}
           onContextMenu={onContextMenu}
-          // Discord's real lightbox — zoom, pan, escape-to-close — takes a plain
-          // url, so a blob: works and we get the whole thing for free. It does
-          // insist on dimensions, hence reading them off the decoded image.
-          onClick={e => {
-            const img = e.currentTarget;
-            openImageModal({
-              url: state.src,
-              original: state.src,
-              width: img.naturalWidth,
-              height: img.naturalHeight,
-              alt: state.filename,
-            });
-          }}
+          onClick={() => openPgpLightbox(state.src, state.filename)}
         />
       </div>
     );

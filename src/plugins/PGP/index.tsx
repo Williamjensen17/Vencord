@@ -5,6 +5,7 @@ import {
   removeMessageAccessory,
 } from "@api/MessageAccessories";
 import {
+  ApplicationCommandInputType,
   ApplicationCommandOptionType,
   findOption,
   sendBotMessage,
@@ -104,6 +105,7 @@ export default definePlugin({
       name: "pgp-generate",
       description:
         "Generate your PGP keypair (uses the passphrase from plugin settings)",
+      inputType: ApplicationCommandInputType.BUILT_IN,
       options: [
         {
           name: "name",
@@ -163,16 +165,20 @@ export default definePlugin({
     {
       name: "pgp-pubkey",
       description: "Send your PGP public key in this channel",
-      execute: async () => {
+      // The only command that intentionally transmits — sharing the public key is
+      // the whole point, and BUILT_IN_TEXT is what makes the returned content get
+      // sent as a real message. Its failure path must still stay local.
+      inputType: ApplicationCommandInputType.BUILT_IN_TEXT,
+      execute: async (_args, ctx) => {
         try {
           const armored = await getOwnPublicKeyArmored();
           return { content: armored };
         } catch (err) {
-          return {
+          return sendBotMessage(ctx.channel.id, {
             content: `Error: ${
               err instanceof Error ? err.message : String(err)
             }`,
-          };
+          });
         }
       },
     },
@@ -181,6 +187,7 @@ export default definePlugin({
     {
       name: "pgp-import",
       description: "Import a friend's PGP public key (1:1 DM only)",
+      inputType: ApplicationCommandInputType.BUILT_IN,
       options: [
         {
           name: "key",
@@ -196,25 +203,24 @@ export default definePlugin({
           const userId = channel?.recipients?.[0];
 
           if (!userId) {
-            return {
-              content:
-                "This command must be run inside a 1:1 DM.",
-            };
+            return sendBotMessage(ctx.channel.id, {
+              content: "This command must be run inside a 1:1 DM.",
+            });
           }
 
           const entry = await importFriendPublicKey(userId, key);
 
-          return {
+          return sendBotMessage(ctx.channel.id, {
             content:
               `✅ Imported key for <@${userId}>\n` +
               `Fingerprint: ${entry.fingerprint}`,
-          };
+          });
         } catch (err) {
-          return {
+          return sendBotMessage(ctx.channel.id, {
             content: `Error: ${
               err instanceof Error ? err.message : String(err)
             }`,
-          };
+          });
         }
       },
     },
@@ -223,19 +229,33 @@ export default definePlugin({
     {
       name: "pgp-toggle",
       description: "Quickly enable/disable PGP encryption",
-      execute: async () => {
+      inputType: ApplicationCommandInputType.BUILT_IN,
+      execute: async (_args, ctx) => {
         const next = !isPgpEnabled();
         setPgpEnabled(next);
 
-        if (!next) {
-          lockSession();
-        }
-
-        return {
+        // Deliberately does NOT lock the key. Encrypting outgoing messages and
+        // being able to read the existing history are separate concerns, and
+        // locking here made every already-decrypted message on screen revert to
+        // "Private key locked."
+        return sendBotMessage(ctx.channel.id, {
           content: next
-            ? "🔐 PGP encryption ENABLED."
-            : "🔓 PGP encryption DISABLED.",
-        };
+            ? "🔐 PGP encryption ENABLED for outgoing messages."
+            : "🔓 PGP encryption DISABLED for outgoing messages. (Your key stays unlocked — use `/pgp-lock` to lock it.)",
+        });
+      },
+    },
+
+    // ✅ LOCK
+    {
+      name: "pgp-lock",
+      description: "Lock your PGP private key for this session",
+      inputType: ApplicationCommandInputType.BUILT_IN,
+      execute: async (_args, ctx) => {
+        lockSession();
+        return sendBotMessage(ctx.channel.id, {
+          content: "🔒 Private key locked. Run `/pgp-unlock` to read encrypted messages again.",
+        });
       },
     },
 
@@ -243,12 +263,13 @@ export default definePlugin({
     {
       name: "pgp-status",
       description: "Show current PGP session status",
-      execute: async () => {
-        return {
+      inputType: ApplicationCommandInputType.BUILT_IN,
+      execute: async (_args, ctx) => {
+        return sendBotMessage(ctx.channel.id, {
           content:
             `PGP Enabled: ${isPgpEnabled() ? "✅ Yes" : "❌ No"}\n` +
             `Session Unlocked: ${isUnlocked() ? "✅ Yes" : "❌ No"}`,
-        };
+        });
       },
     },
 
@@ -256,18 +277,21 @@ export default definePlugin({
     {
       name: "pgp-unlock",
       description: "Unlock your PGP private key for this session",
-      execute: async () => {
+      inputType: ApplicationCommandInputType.BUILT_IN,
+      execute: async (_args, ctx) => {
         const passphrase = settings.store.passphrase;
 
         if (!passphrase) {
-          return { content: "No passphrase set in plugin settings." };
+          return sendBotMessage(ctx.channel.id, {
+            content: "No passphrase set in plugin settings.",
+          });
         }
 
         const ok = await unlockSession(passphrase);
 
-        return ok
-          ? { content: "PGP unlocked ✅" }
-          : { content: "Incorrect passphrase ❌" };
+        return sendBotMessage(ctx.channel.id, {
+          content: ok ? "PGP unlocked ✅" : "Incorrect passphrase ❌",
+        });
       },
     },
   ],
@@ -287,6 +311,12 @@ export default definePlugin({
     `;
 
     registerOutgoingEncryption();
+
+    // The unlocked key only ever lives in memory, so a client restart always
+    // comes back locked. Without this the setting was declared but never read.
+    if (settings.store.autoUnlockOnStart && settings.store.passphrase) {
+      unlockSession(settings.store.passphrase).catch(() => {});
+    }
 
     addMessageAccessory("pgp-decrypted-content", props => {
       const message = props.message;

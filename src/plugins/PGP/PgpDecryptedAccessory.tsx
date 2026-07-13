@@ -1,5 +1,6 @@
 import { React } from "@webpack/common";
 import { tryDecryptMessage } from "./messageDecrypt";
+import { getSessionGeneration, subscribeToSession } from "./session";
 
 export function PgpDecryptedAccessory({
   content,
@@ -9,9 +10,18 @@ export function PgpDecryptedAccessory({
     status: "loading",
   } as any);
 
+  const generation = React.useSyncExternalStore(
+    subscribeToSession,
+    getSessionGeneration,
+  );
+
   React.useEffect(() => {
+    // Guards against a slow decrypt from a previous generation landing after a
+    // newer one and overwriting it.
+    let stale = false;
+
     tryDecryptMessage(content, senderId).then(result => {
-      if (!result) return;
+      if (stale || !result) return;
 
       if (result.success) {
         setState({
@@ -26,7 +36,11 @@ export function PgpDecryptedAccessory({
         });
       }
     });
-  }, [content, senderId]);
+
+    return () => {
+      stale = true;
+    };
+  }, [content, senderId, generation]);
 
   if (state.status === "loading") {
     return <div className="vc-pgp-decrypted">🔒 Decrypting…</div>;

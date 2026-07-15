@@ -154,6 +154,52 @@ export default definePlugin({
       },
     },
 
+    // ✅ VIEW YOUR OWN KEYS
+    {
+      name: "pgp-mykeys",
+      description: "View your saved PGP keypair details",
+      inputType: ApplicationCommandInputType.BUILT_IN,
+      options: [
+        {
+          name: "showkey",
+          description: "Also print the full armored public key block",
+          type: ApplicationCommandOptionType.BOOLEAN,
+          required: false,
+        },
+      ],
+      execute: async (args, ctx) => {
+        try {
+          const record = await getOwnKeypair();
+          if (!record) {
+            return sendBotMessage(ctx.channel.id, {
+              content:
+                "❌ No keypair found. Run `/pgp-generate` to create one.",
+            });
+          }
+
+          const date = new Date(record.createdAt).toLocaleString();
+          let content =
+            "**Your PGP Keypair**\n" +
+            `Fingerprint: \`${record.fingerprint}\`\n` +
+            `Created: ${date}\n` +
+            `Private key: ✅ Stored\n` +
+            `Public key: ✅ Stored`;
+
+          if (findOption(args, "showkey", false)) {
+            content += `\n\n**Public key:**\n\`\`\`\n${record.publicKeyArmored}\n\`\`\``;
+          }
+
+          return sendBotMessage(ctx.channel.id, { content });
+        } catch (err) {
+          return sendBotMessage(ctx.channel.id, {
+            content: `Error: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          });
+        }
+      },
+    },
+
     // ✅ IMPORT FRIEND PUBLIC KEY
     {
       name: "pgp-import",
@@ -186,6 +232,60 @@ export default definePlugin({
               `✅ Imported key for <@${userId}>\n` +
               `Fingerprint: ${entry.fingerprint}`,
           });
+        } catch (err) {
+          return sendBotMessage(ctx.channel.id, {
+            content: `Error: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          });
+        }
+      },
+    },
+
+    // ✅ LIST OTHER USERS' SAVED PUBLIC KEYS
+    {
+      name: "pgp-listkeys",
+      description: "List all saved PGP public keys from contacts",
+      inputType: ApplicationCommandInputType.BUILT_IN,
+      options: [
+        {
+          name: "showkey",
+          description: "Also print each full armored public key block",
+          type: ApplicationCommandOptionType.BOOLEAN,
+          required: false,
+        },
+      ],
+      execute: async (args, ctx) => {
+        try {
+          const users = await listKnownUsers();
+
+          if (!users.length) {
+            return sendBotMessage(ctx.channel.id, {
+              content:
+                "No saved public keys. Use `/pgp-import` in a DM to add one.",
+            });
+          }
+
+          const showKey = findOption(args, "showkey", false);
+
+          let content = `**Saved Public Keys** (${users.length})\n`;
+          for (const user of users) {
+            const date = new Date(user.addedAt).toLocaleString();
+            content +=
+              `\n<@${user.userId}>` +
+              `\nFingerprint: \`${user.fingerprint}\`` +
+              `\nAdded: ${date}` +
+              `\nAuto-encrypt: ${user.autoEncryptEnabled ? "✅" : "❌"}` +
+              ` · Trusted: ${user.trusted ? "✅" : "❌"}`;
+
+            if (showKey) {
+              content += `\n\`\`\`\n${user.publicKeyArmored}\n\`\`\``;
+            }
+
+            content += "\n";
+          }
+
+          return sendBotMessage(ctx.channel.id, { content });
         } catch (err) {
           return sendBotMessage(ctx.channel.id, {
             content: `Error: ${

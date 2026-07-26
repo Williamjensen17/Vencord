@@ -291,3 +291,10 @@ export function looksLikeArmoredMessage(text: string): boolean {
     text.includes("-----END PGP MESSAGE-----")
   );
 }
+
+export function looksLikeArmoredPrivateKey(text: string): boolean {
+  return (
+    text.includes("-----BEGIN PGP PRIVATE KEY BLOCK-----") &&
+    text.includes("-----END PGP PRIVATE KEY BLOCK-----")
+  );
+}

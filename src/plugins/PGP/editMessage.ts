@@ -4,17 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import type { RenderModalProps } from "@vencord/discord-types";
 import { findByProps } from "@webpack";
-import {
-  MessageStore,
-  Modal,
-  openModal,
-  React,
-  showToast,
-  TextArea,
-  Toasts,
-} from "@webpack/common";
+import { MessageStore, showToast, Toasts } from "@webpack/common";
 
 import { tryDecryptMessage } from "./messageDecrypt";
 import { encryptPgpContentForChannel } from "./outgoing";
@@ -26,6 +17,17 @@ interface EditableMessage {
   content: string;
   author?: { id?: string; };
 }
+
+interface EditBody {
+  content: string;
+  [key: string]: unknown;
+}
+
+type EditMessage = (
+  channelId: string,
+  messageId: string,
+  body: EditBody,
+) => Promise<void>;
 
 type StartEditMessage = (
   channelId: string,
@@ -42,92 +44,24 @@ type StartEditMessageRecord = (
 
 interface MessageActions {
   deleteMessage: (...args: unknown[]) => unknown;
-  editMessage: (
-    channelId: string,
-    messageId: string,
-    body: { content: string; },
-  ) => Promise<void>;
+  editMessage: EditMessage;
   startEditMessage: StartEditMessage;
   startEditMessageRecord?: StartEditMessageRecord;
 }
 
 let messageActions: MessageActions | null = null;
+let originalEditMessage: EditMessage | null = null;
 let originalStartEditMessage: StartEditMessage | null = null;
 let originalStartEditMessageRecord: StartEditMessageRecord | null = null;
+let wrappedEditMessage: EditMessage | null = null;
 let wrappedStartEditMessage: StartEditMessage | null = null;
 let wrappedStartEditMessageRecord: StartEditMessageRecord | null = null;
-
-function PgpEditModal({
-  channelId,
-  initialText,
-  messageId,
-  modalProps,
-}: {
-  channelId: string;
-  initialText: string;
-  messageId: string;
-  modalProps: RenderModalProps;
-}) {
-  const [text, setText] = React.useState(initialText);
-  const [saving, setSaving] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-
-  const save = async () => {
-    if (saving || !text.trim() || !messageActions) return;
-
-    setSaving(true);
-    setError(null);
-
-    try {
-      // Only the armored result crosses into Discord's edit action. Plaintext
-      // remains in this plugin-owned component state and never enters Flux.
-      const encrypted = await encryptPgpContentForChannel(channelId, text);
-      await messageActions.editMessage(channelId, messageId, {
-        content: encrypted,
-      });
-      modalProps.onClose();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Modal
-      {...modalProps}
-      title="Edit encrypted message"
-      subtitle="The editor stays local; only newly encrypted PGP text is sent to Discord."
-      actions={[
-        {
-          text: "Cancel",
-          variant: "secondary",
-          onClick: modalProps.onClose,
-          disabled: saving,
-        },
-        {
-          text: saving ? "Encrypting…" : "Save",
-          variant: "primary",
-          onClick: save,
-          disabled: saving || !text.trim(),
-        },
-      ]}
-      notice={error ? { message: error, type: "critical" } : undefined}
-    >
-      <TextArea
-        autoFocus
-        autosize
-        value={text}
-        onChange={setText}
-        placeholder="Message"
-      />
-    </Modal>
-  );
-}
 
 async function beginPgpEdit(
   channelId: string,
   messageId: string,
   armoredContent: string,
+  source?: unknown,
 ) {
   const storedMessage = MessageStore.getMessage(channelId, messageId) as EditableMessage | undefined;
   const result = await tryDecryptMessage(
@@ -143,14 +77,16 @@ async function beginPgpEdit(
     return;
   }
 
-  openModal(modalProps => (
-    <PgpEditModal
-      channelId={channelId}
-      initialText={result.plaintext!}
-      messageId={messageId}
-      modalProps={modalProps}
-    />
-  ));
+  // Use Discord's real inline editor and all of its native keyboard/accessibility
+  // behavior. The final editMessage wrapper below is the network boundary and
+  // replaces this local plaintext with ciphertext before Discord can send it.
+  originalStartEditMessage?.call(
+    messageActions,
+    channelId,
+    messageId,
+    result.plaintext,
+    source,
+  );
 }
 
 export function installPgpEditInterceptor() {
@@ -163,8 +99,32 @@ export function installPgpEditInterceptor() {
   ) as MessageActions;
 
   messageActions = actions;
+  originalEditMessage = actions.editMessage;
   originalStartEditMessage = actions.startEditMessage;
   originalStartEditMessageRecord = actions.startEditMessageRecord ?? null;
+
+  wrappedEditMessage = async (channelId, messageId, body) => {
+    const storedMessage = MessageStore.getMessage(channelId, messageId) as EditableMessage | undefined;
+    const isPgpEdit = storedMessage?.content.includes(PGP_MESSAGE_HEADER);
+
+    if (!isPgpEdit || body.content.includes(PGP_MESSAGE_HEADER)) {
+      return originalEditMessage!.call(actions, channelId, messageId, body);
+    }
+
+    try {
+      const encrypted = await encryptPgpContentForChannel(channelId, body.content);
+      return originalEditMessage!.call(actions, channelId, messageId, {
+        ...body,
+        content: encrypted,
+      });
+    } catch (caught) {
+      showToast(
+        caught instanceof Error ? caught.message : String(caught),
+        Toasts.Type.FAILURE,
+      );
+    }
+  };
+  actions.editMessage = wrappedEditMessage;
 
   wrappedStartEditMessage = (channelId, messageId, content, source) => {
     if (!content.includes(PGP_MESSAGE_HEADER)) {
@@ -178,7 +138,7 @@ export function installPgpEditInterceptor() {
       return;
     }
 
-    void beginPgpEdit(channelId, messageId, content);
+    void beginPgpEdit(channelId, messageId, content, source);
   };
   actions.startEditMessage = wrappedStartEditMessage;
 
@@ -189,13 +149,22 @@ export function installPgpEditInterceptor() {
         return;
       }
 
-      void beginPgpEdit(channelId, message.id, message.content);
+      void beginPgpEdit(channelId, message.id, message.content, source);
     };
     actions.startEditMessageRecord = wrappedStartEditMessageRecord;
   }
 }
 
 export function uninstallPgpEditInterceptor() {
+  if (
+    messageActions
+    && originalEditMessage
+    && wrappedEditMessage
+    && messageActions.editMessage === wrappedEditMessage
+  ) {
+    messageActions.editMessage = originalEditMessage;
+  }
+
   if (
     messageActions
     && originalStartEditMessage
@@ -215,8 +184,10 @@ export function uninstallPgpEditInterceptor() {
   }
 
   messageActions = null;
+  originalEditMessage = null;
   originalStartEditMessage = null;
   originalStartEditMessageRecord = null;
+  wrappedEditMessage = null;
   wrappedStartEditMessage = null;
   wrappedStartEditMessageRecord = null;
 }

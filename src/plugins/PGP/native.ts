@@ -1,5 +1,11 @@
-import { IpcMainInvokeEvent } from "electron";
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import { lookup } from "dns/promises";
+import { IpcMainInvokeEvent } from "electron";
 import { isIP } from "net";
 
 /**
@@ -62,11 +68,11 @@ function isPrivateAddress(ip: string): boolean {
     a === 0 ||
     a === 10 ||
     a === 127 ||
-    (a === 169 && b === 254) ||            // link-local / cloud metadata
+    (a === 169 && b === 254) || // link-local / cloud metadata
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
-    (a === 100 && b >= 64 && b <= 127) ||  // CGNAT
-    a >= 224                               // multicast / reserved
+    (a === 100 && b >= 64 && b <= 127) || // CGNAT
+    a >= 224 // multicast / reserved
   );
 }
 

@@ -1,8 +1,14 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import type { Key } from "openpgp";
 
 import { decryptText, parsePublicKey } from "./crypto";
-import { getUnlockedPrivateKey, isUnlocked } from "./session";
 import { getKey, getOwnKeypair } from "./keystore";
+import { getUnlockedPrivateKey, isUnlocked } from "./session";
 
 export async function tryDecryptMessage(
   content: string,

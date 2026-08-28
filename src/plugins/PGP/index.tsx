@@ -29,6 +29,11 @@ import {
   warmKeyring,
 } from "./keystore";
 import {
+  handlePgpMessageCreate,
+  installPgpNotificationInterceptor,
+  uninstallPgpNotificationInterceptor,
+} from "./notifications";
+import {
   isPgpEnabled,
   registerOutgoingEncryption,
   setPgpEnabled,
@@ -87,6 +92,10 @@ export default definePlugin({
       },
     },
   ],
+
+  flux: {
+    MESSAGE_CREATE: handlePgpMessageCreate,
+  },
 
   commands: [
     // Create your keypair. Nothing else works until this has been run once.
@@ -864,6 +873,7 @@ export default definePlugin({
 
     registerOutgoingEncryption();
     registerUploadEncryption();
+    installPgpNotificationInterceptor();
 
     // Warm the in-memory keyring cache up front. Decryption reads keys on every
     // message; reading them here (and caching them) means each decrypt no longer
@@ -916,6 +926,7 @@ export default definePlugin({
     lockSession();
     unregisterOutgoingEncryption();
     unregisterUploadEncryption();
+    uninstallPgpNotificationInterceptor();
     removeMessageAccessory("pgp-decrypted-content");
     removeMessageAccessory("pgp-decrypted-attachments");
   },

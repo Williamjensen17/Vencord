@@ -21,6 +21,7 @@ import definePlugin from "@utils/types";
 import { ChannelStore } from "@webpack/common";
 
 import { changePassphrase, looksLikeArmoredPrivateKey, normalizeArmoredText } from "./crypto";
+import { installPgpEditInterceptor, uninstallPgpEditInterceptor } from "./editMessage";
 import { getOwnPublicKeyArmored, importFriendPublicKey } from "./keyExchange";
 import {
   getOwnKeypair,
@@ -892,6 +893,7 @@ export default definePlugin({
 
     registerOutgoingEncryption();
     registerUploadEncryption();
+    installPgpEditInterceptor();
     installPgpNotificationInterceptor();
 
     // Warm the in-memory keyring cache up front. Decryption reads keys on every
@@ -945,6 +947,7 @@ export default definePlugin({
     lockSession();
     unregisterOutgoingEncryption();
     unregisterUploadEncryption();
+    uninstallPgpEditInterceptor();
     uninstallPgpNotificationInterceptor();
     removeMessageAccessory("pgp-decrypted-content");
     removeMessageAccessory("pgp-decrypted-attachments");

@@ -8,8 +8,9 @@ import {
   addMessagePreSendListener,
   removeMessagePreSendListener,
 } from "@api/MessageEvents";
+import { ChannelStore } from "@webpack/common";
 
-import { encryptText,parsePublicKey } from "./crypto";
+import { encryptText, parsePublicKey } from "./crypto";
 import { getKey, getOwnKeypair } from "./keystore";
 import { getUnlockedPrivateKey, isUnlocked } from "./session";
 
@@ -23,27 +24,26 @@ export function isPgpEnabled() {
   return pgpEnabled;
 }
 
-function getDmRecipientId(channel: { recipients?: string[] }) {
+interface DmChannel {
+  recipients?: string[];
+}
+
+function getDmRecipientId(channel: DmChannel) {
   if (channel.recipients?.length === 1) {
     return channel.recipients[0];
   }
   return null;
 }
 
-const listener = async (_channelId, messageObj, _options, props) => {
-  if (!pgpEnabled) return;
-
-  const { content } = messageObj;
-  if (!content) return;
-
-  const recipientId = getDmRecipientId(props.channel as any);
-  if (!recipientId) return;
+async function encryptForDmChannel(channel: DmChannel, content: string): Promise<string | null> {
+  const recipientId = getDmRecipientId(channel);
+  if (!recipientId) return null;
 
   const entry = await getKey(recipientId);
-  if (!entry?.publicKeyArmored) return;
+  if (!entry?.publicKeyArmored) return null;
 
   const pubKey = await parsePublicKey(entry.publicKeyArmored);
-  if (!pubKey) return;
+  if (!pubKey) return null;
 
   const encryptionKeys = [pubKey];
 
@@ -53,16 +53,37 @@ const listener = async (_channelId, messageObj, _options, props) => {
     if (ownPub) encryptionKeys.push(ownPub);
   }
 
-  let signingKey;
-  if (isUnlocked()) {
-    signingKey = getUnlockedPrivateKey();
-  }
+  const signingKey = isUnlocked()
+    ? getUnlockedPrivateKey()
+    : undefined;
 
-  messageObj.content = await encryptText({
+  return encryptText({
     text: content,
     recipientPublicKeys: encryptionKeys,
     signingKey,
   });
+}
+
+/** Encrypts an edit without ever putting its plaintext in Discord's edit store. */
+export async function encryptPgpContentForChannel(channelId: string, content: string) {
+  const channel = ChannelStore.getChannel(channelId);
+  if (!channel) throw new Error("Channel is no longer available.");
+
+  const encrypted = await encryptForDmChannel(channel, content);
+  if (!encrypted) {
+    throw new Error("This DM recipient does not have an imported PGP public key.");
+  }
+  return encrypted;
+}
+
+const listener = async (_channelId, messageObj, _options, props) => {
+  if (!pgpEnabled) return;
+
+  const { content } = messageObj;
+  if (!content) return;
+
+  const encrypted = await encryptForDmChannel(props.channel, content);
+  if (encrypted) messageObj.content = encrypted;
 };
 
 export function registerOutgoingEncryption() {

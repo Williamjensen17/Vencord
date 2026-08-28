@@ -42,9 +42,11 @@
         "gifenc": "github:mattdesl/gifenc#64842fca317b112a8590f8fef2bf3825da8f6fe3",
         "monaco-editor": "^0.55.1",
         "nanoid": "^5.1.16",
+        "openpgp": "^6.3.1",
         "virtual-merge": "^1.0.1"
     },
     "devDependencies": {
+        "@openpgp/web-stream-tools": "^0.3.1",
         "@stylistic/eslint-plugin": "^5.10.0",
         "@types/chrome": "^0.2.0",
         "@types/lodash": "^4.17.24",

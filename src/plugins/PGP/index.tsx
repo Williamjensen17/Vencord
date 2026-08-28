@@ -1,44 +1,48 @@
-import definePlugin from "@utils/types";
-import ErrorBoundary from "@components/ErrorBoundary";
-import {
-  addMessageAccessory,
-  removeMessageAccessory,
-} from "@api/MessageAccessories";
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import {
   ApplicationCommandInputType,
   ApplicationCommandOptionType,
   findOption,
   sendBotMessage,
 } from "@api/Commands";
-import { ChannelStore } from "@webpack/common";
-import { createAndAppendStyle } from "@utils/css";
+import {
+  addMessageAccessory,
+  removeMessageAccessory,
+} from "@api/MessageAccessories";
 import { managedStyleRootNode } from "@api/Styles";
+import ErrorBoundary from "@components/ErrorBoundary";
+import { createAndAppendStyle } from "@utils/css";
+import definePlugin from "@utils/types";
+import { ChannelStore } from "@webpack/common";
 
+import { changePassphrase, looksLikeArmoredPrivateKey, normalizeArmoredText } from "./crypto";
+import { getOwnPublicKeyArmored, importFriendPublicKey } from "./keyExchange";
 import {
   getOwnKeypair,
   listKnownUsers,
   saveOwnKeypair,
+  warmKeyring,
 } from "./keystore";
-
 import {
+  isPgpEnabled,
+  registerOutgoingEncryption,
+  setPgpEnabled,
+  unregisterOutgoingEncryption,
+} from "./outgoing";
+import { PgpAttachments } from "./PgpAttachments";
+import { PgpDecryptedAccessory } from "./PgpDecryptedAccessory";
+import { PGPReplyPreview } from "./replyPreview";
+import {
+  createAndUnlockNewKeypair,
   isUnlocked,
   lockSession,
   unlockSession,
-  createAndUnlockNewKeypair,
 } from "./session";
-
-import { changePassphrase, looksLikeArmoredPrivateKey, normalizeArmoredText } from "./crypto";
-import { getOwnPublicKeyArmored, importFriendPublicKey } from "./keyExchange";
-
-import {
-  registerOutgoingEncryption,
-  unregisterOutgoingEncryption,
-  setPgpEnabled,
-  isPgpEnabled,
-} from "./outgoing";
-
-import { PgpDecryptedAccessory } from "./PgpDecryptedAccessory";
-import { PgpAttachments } from "./PgpAttachments";
 import { settings } from "./settings";
 import {
   registerUploadEncryption,
@@ -63,12 +67,26 @@ export default definePlugin({
     "CommandsAPI",
   ],
 
-  // No patches. The message row used to be tagged by patching
-  // "Message must not be a thread starter message", but Discord changed that
-  // code — stock MessageLogger fails on the identical string — and the class
-  // silently stopped being applied, un-hiding the raw ciphertext. The accessories
-  // now tag their own row via useTagMessageRow(), which depends on nothing
-  // minified.
+  // The message row used to be tagged by patching "Message must not be a
+  // thread starter message", but Discord changed that code — stock
+  // MessageLogger fails on the identical string — and the class silently
+  // stopped being applied. The accessories now tag their own row via
+  // useTagMessageRow(), which depends on nothing minified. The reply-quote
+  // panel, however, has no accessory hook, so it still needs the one patch
+  // below.
+  patches: [
+    {
+      // Same module anchor as the official ReplyTimestamp/ValidReply plugins:
+      // the chat reply-quote renderer. PGPReplyPreview writes the decrypted
+      // text into Discord's native preview element, so the reply keeps
+      // Discord's exact structure and styling (see replyPreview.tsx).
+      find: "#{intl::REPLY_QUOTE_MESSAGE_NOT_LOADED}",
+      replacement: {
+        match: /\.onClickReply,.+?}\),(?=\i,\i,\i\])/,
+        replace: "$&$self.PGPReplyPreview(arguments[0]),",
+      },
+    },
+  ],
 
   commands: [
     // Create your keypair. Nothing else works until this has been run once.
@@ -93,7 +111,7 @@ export default definePlugin({
       ],
       execute: async (args, ctx) => {
         try {
-          const passphrase = settings.store.passphrase;
+          const { passphrase } = settings.store;
           if (!passphrase) {
             return sendBotMessage(ctx.channel.id, {
               content:
@@ -182,8 +200,8 @@ export default definePlugin({
             "**Your PGP Keypair**\n" +
             `Fingerprint: \`${record.fingerprint}\`\n` +
             `Created: ${date}\n` +
-            `Private key: ✅ Stored\n` +
-            `Public key: ✅ Stored`;
+            "Private key: ✅ Stored\n" +
+            "Public key: ✅ Stored";
 
           if (findOption(args, "showkey", false)) {
             content += `\n\n**Public key:**\n\`\`\`\n${record.publicKeyArmored}\n\`\`\``;
@@ -422,7 +440,7 @@ export default definePlugin({
       description: "Unlock your PGP private key for this session",
       inputType: ApplicationCommandInputType.BUILT_IN,
       execute: async (_args, ctx) => {
-        const passphrase = settings.store.passphrase;
+        const { passphrase } = settings.store;
 
         if (!passphrase) {
           return sendBotMessage(ctx.channel.id, {
@@ -450,9 +468,9 @@ export default definePlugin({
           type: ApplicationCommandOptionType.STRING,
           required: false,
           choices: [
-            { name: "Both keys (public + private)", value: "both", displayName: "Both keys (public + private)" },
-            { name: "Public key only", value: "public", displayName: "Public key only" },
-            { name: "Private key only", value: "private", displayName: "Private key only" },
+            { name: "Both keys (public + private)", label: "Both keys (public + private)", value: "both", displayName: "Both keys (public + private)" },
+            { name: "Public key only", label: "Public key only", value: "public", displayName: "Public key only" },
+            { name: "Private key only", label: "Private key only", value: "private", displayName: "Private key only" },
           ],
         },
       ],
@@ -578,6 +596,8 @@ export default definePlugin({
     },
   ],
 
+  PGPReplyPreview: ErrorBoundary.wrap(PGPReplyPreview, { noop: true }),
+
   async start() {
     pgpStyle = createAndAppendStyle("VcPGPEncrypted", managedStyleRootNode);
     pgpStyle.textContent = `
@@ -686,6 +706,29 @@ export default definePlugin({
         font-size: 0.875rem;
         line-height: 1.125rem;
         white-space: pre-wrap;
+      }
+      /* Discord's native reply preview contains the raw armored message. Hide
+         it for encrypted replies and render the decrypted sibling instead. */
+      .vc-pgp-reply [class*="repliedTextContent"],
+      .vc-pgp-reply [class*="repliedTextPreview"] {
+        display: none !important;
+      }
+      .vc-pgp-reply-text {
+        color: var(--text-default, var(--text-normal, inherit));
+        font-size: 0.875rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+        cursor: pointer;
+      }
+      .vc-pgp-reply-text:hover {
+        color: var(--interactive-active, var(--text-default, var(--text-normal, inherit)));
+        filter: brightness(1.1);
+      }
+      .vc-pgp-reply:hover [class*="repliedMessageClickableSpine"] {
+        color: var(--interactive-active, var(--text-normal, inherit)) !important;
+        filter: brightness(1.1);
       }
       .vc-pgp-embed-image {
         margin-top: 0.5rem;
@@ -822,6 +865,12 @@ export default definePlugin({
     registerOutgoingEncryption();
     registerUploadEncryption();
 
+    // Warm the in-memory keyring cache up front. Decryption reads keys on every
+    // message; reading them here (and caching them) means each decrypt no longer
+    // races a lazily-initialising IndexedDB, which intermittently produced a
+    // false "signature invalid" verdict that a reload always cleared.
+    warmKeyring();
+
     // The unlocked key only ever lives in memory, so a client restart always
     // comes back locked. Without this the setting was declared but never read.
     if (settings.store.autoUnlockOnStart && settings.store.passphrase) {
@@ -829,7 +878,7 @@ export default definePlugin({
     }
 
     addMessageAccessory("pgp-decrypted-content", props => {
-      const message = props.message;
+      const { message } = props;
       const content: string = message?.content ?? "";
 
       if (!content.includes("-----BEGIN PGP MESSAGE-----")) return null;
@@ -843,7 +892,7 @@ export default definePlugin({
     });
 
     addMessageAccessory("pgp-decrypted-attachments", props => {
-      const message = props.message;
+      const { message } = props;
 
       const encrypted = (message?.attachments ?? []).filter(
         (a: any) => a?.filename?.endsWith(".pgp"),

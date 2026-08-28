@@ -1,5 +1,11 @@
-import { getOwnKeypair, addOrUpdateKey } from "./keystore";
-import { parsePublicKey, looksLikeArmoredPublicKey, normalizeArmoredText } from "./crypto";
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+import { looksLikeArmoredPublicKey, normalizeArmoredText,parsePublicKey } from "./crypto";
+import { addOrUpdateKey,getOwnKeypair } from "./keystore";
 
 export async function getOwnPublicKeyArmored() {
   const record = await getOwnKeypair();

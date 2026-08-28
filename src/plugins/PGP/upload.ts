@@ -1,3 +1,9 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import { sendBotMessage } from "@api/Commands";
 import { findLazy } from "@webpack";
 import { ChannelStore } from "@webpack/common";
@@ -72,7 +78,7 @@ async function encryptUpload(upload: any): Promise<boolean> {
 
   const recipientKey = await parsePublicKey(entry.publicKeyArmored);
   if (!recipientKey) {
-    block(upload, `their stored PGP key could not be parsed`);
+    block(upload, "their stored PGP key could not be parsed");
     return false;
   }
 
@@ -85,7 +91,7 @@ async function encryptUpload(upload: any): Promise<boolean> {
     if (ownKey) encryptionKeys.push(ownKey);
   }
 
-  const file: File = upload.item.file;
+  const { file } = upload.item;
   const bytes = new Uint8Array(await file.arrayBuffer());
 
   const ciphertext = await encryptFile({

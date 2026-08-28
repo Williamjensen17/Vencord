@@ -1,3 +1,9 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import { DataStore } from "@api/index";
 
 const USERS_STORE_KEY = "PGP_KNOWN_USERS";
@@ -22,12 +28,52 @@ export interface OwnKeypairRecord {
 
 type UsersMap = Record<string, PgpUserEntry>;
 
+// In-memory cache for every read path. Decryption calls getKey() / getOwnKeypair()
+// on every message, and DataStore (IndexedDB) can serve inconsistent or partial
+// values mid-session while its writes flush lazily. That intermittently gave a
+// false "signature invalid" verdict that a cold reload always cleared. Caching a
+// consistent snapshot removes the dependence on IndexedDB timing.
+let usersCache: UsersMap | null = null;
+let ownKeypairCache: OwnKeypairRecord | null = null;
+
+// Bumped every time the keyring is written. Accessories subscribe so a
+// decryption result computed against a not-yet-loaded keyring gets recomputed
+// once the keys are actually available.
+let keyringGeneration = 0;
+const listeners = new Set<() => void>();
+
+export function getKeyringGeneration(): number {
+  return keyringGeneration;
+}
+
+export function subscribeToKeyring(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+
+function notifyKeyringChanged() {
+  keyringGeneration++;
+  for (const cb of listeners) cb();
+}
+
 async function loadUsersMap(): Promise<UsersMap> {
-  return (await DataStore.get<UsersMap>(USERS_STORE_KEY)) ?? {};
+  if (usersCache) return usersCache;
+  const map = (await DataStore.get<UsersMap>(USERS_STORE_KEY)) ?? {};
+  usersCache = map;
+  return map;
 }
 
 async function saveUsersMap(map: UsersMap): Promise<void> {
+  usersCache = map;
   await DataStore.set(USERS_STORE_KEY, map);
+  notifyKeyringChanged();
+}
+
+/** Warms both caches from IndexedDB so reads during the session are consistent. */
+export async function warmKeyring(): Promise<void> {
+  await loadUsersMap();
+  ownKeypairCache =
+    (await DataStore.get<OwnKeypairRecord>(OWN_KEYPAIR_STORE_KEY)) ?? null;
 }
 
 export async function addOrUpdateKey(
@@ -67,11 +113,14 @@ export async function listKnownUsers() {
 }
 
 export async function saveOwnKeypair(record: OwnKeypairRecord) {
+  ownKeypairCache = record;
   await DataStore.set(OWN_KEYPAIR_STORE_KEY, record);
+  notifyKeyringChanged();
 }
 
 export async function getOwnKeypair() {
-  return (
-    (await DataStore.get<OwnKeypairRecord>(OWN_KEYPAIR_STORE_KEY)) ?? null
-  );
+  if (ownKeypairCache) return ownKeypairCache;
+  ownKeypairCache =
+    (await DataStore.get<OwnKeypairRecord>(OWN_KEYPAIR_STORE_KEY)) ?? null;
+  return ownKeypairCache;
 }

@@ -1,5 +1,13 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Parser, React } from "@webpack/common";
+
+import { getKeyringGeneration, subscribeToKeyring } from "./keystore";
 import { tryDecryptMessage } from "./messageDecrypt";
 import { PgpEmbeds } from "./PgpEmbeds";
 import { getSessionGeneration, subscribeToSession } from "./session";
@@ -43,6 +51,15 @@ export function PgpDecryptedAccessory({
     getSessionGeneration,
   );
 
+  // Re-evaluate when the keyring changes too. A decrypted result is cached in
+  // component state, and if the friend's key was read incompletely at first
+  // (see keystore), the verification could have landed on a bad verdict. Any
+  // key import/update recomputes it against the full, consistent keyring.
+  const keyringGeneration = React.useSyncExternalStore(
+    subscribeToKeyring,
+    getKeyringGeneration,
+  );
+
   // Must stay above the early returns — they are hooks.
   const { linkEmbeds: embedMode, lockIconColor, warningIconColor } = settings.use([
     "linkEmbeds",
@@ -77,7 +94,7 @@ export function PgpDecryptedAccessory({
     return () => {
       stale = true;
     };
-  }, [content, senderId, generation]);
+  }, [content, senderId, generation, keyringGeneration]);
 
   if (state.status === "loading") {
     return (

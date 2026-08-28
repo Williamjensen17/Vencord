@@ -1,9 +1,16 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import {
   addMessagePreSendListener,
   removeMessagePreSendListener,
 } from "@api/MessageEvents";
+
+import { encryptText,parsePublicKey } from "./crypto";
 import { getKey, getOwnKeypair } from "./keystore";
-import { parsePublicKey, encryptText } from "./crypto";
 import { getUnlockedPrivateKey, isUnlocked } from "./session";
 
 let pgpEnabled = true;
@@ -26,7 +33,7 @@ function getDmRecipientId(channel: { recipients?: string[] }) {
 const listener = async (_channelId, messageObj, _options, props) => {
   if (!pgpEnabled) return;
 
-  const content = messageObj.content;
+  const { content } = messageObj;
   if (!content) return;
 
   const recipientId = getDmRecipientId(props.channel as any);

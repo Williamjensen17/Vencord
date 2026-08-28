@@ -1,6 +1,13 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import * as openpgp from "openpgp";
-import { getOwnKeypair, saveOwnKeypair } from "./keystore";
+
 import { generateKeypair, unlockPrivateKey } from "./crypto";
+import { getOwnKeypair, saveOwnKeypair } from "./keystore";
 
 let unlockedPrivateKey: openpgp.PrivateKey | null = null;
 

@@ -29,6 +29,12 @@ import {
   warmKeyring,
 } from "./keystore";
 import {
+  handlePgpMessageCreate,
+  installPgpNotificationInterceptor,
+  showPgpTestNotification,
+  uninstallPgpNotificationInterceptor,
+} from "./notifications";
+import {
   isPgpEnabled,
   registerOutgoingEncryption,
   setPgpEnabled,
@@ -87,6 +93,10 @@ export default definePlugin({
       },
     },
   ],
+
+  flux: {
+    MESSAGE_CREATE: handlePgpMessageCreate,
+  },
 
   commands: [
     // Create your keypair. Nothing else works until this has been run once.
@@ -431,6 +441,24 @@ export default definePlugin({
             `PGP Enabled: ${isPgpEnabled() ? "✅ Yes" : "❌ No"}\n` +
             `Session Unlocked: ${isUnlocked() ? "✅ Yes" : "❌ No"}`,
         });
+      },
+    },
+
+    {
+      name: "pgp-test-notification",
+      description: "Show a locally encrypted PGP notification test",
+      inputType: ApplicationCommandInputType.BUILT_IN,
+      execute: async (_args, ctx) => {
+        try {
+          await showPgpTestNotification();
+          return sendBotMessage(ctx.channel.id, {
+            content: "PGP notification test sent locally. It should say: `PGP notification decrypted successfully.`",
+          });
+        } catch (error) {
+          return sendBotMessage(ctx.channel.id, {
+            content: `PGP notification test failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
       },
     },
 
@@ -864,6 +892,7 @@ export default definePlugin({
 
     registerOutgoingEncryption();
     registerUploadEncryption();
+    installPgpNotificationInterceptor();
 
     // Warm the in-memory keyring cache up front. Decryption reads keys on every
     // message; reading them here (and caching them) means each decrypt no longer
@@ -916,6 +945,7 @@ export default definePlugin({
     lockSession();
     unregisterOutgoingEncryption();
     unregisterUploadEncryption();
+    uninstallPgpNotificationInterceptor();
     removeMessageAccessory("pgp-decrypted-content");
     removeMessageAccessory("pgp-decrypted-attachments");
   },

@@ -57,6 +57,7 @@ export async function tryDecryptMessage(
       success: true,
       plaintext: result.data,
       verified: result.verified,
+      verificationError: result.verificationError,
     };
   } catch (err) {
     return {

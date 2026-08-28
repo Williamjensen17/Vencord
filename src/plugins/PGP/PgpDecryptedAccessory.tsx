@@ -82,6 +82,7 @@ export function PgpDecryptedAccessory({
           status: "success",
           plaintext: result.plaintext,
           verified: result.verified,
+          verificationError: result.verificationError,
         });
       } else {
         setState({
@@ -132,7 +133,7 @@ export function PgpDecryptedAccessory({
         style={badgeColor ? { color: badgeColor } : undefined}
         title={
           tampered
-            ? "Decrypted — SIGNATURE INVALID. This message may have been tampered with."
+            ? `Decrypted — SIGNATURE INVALID: ${state.verificationError ?? "OpenPGP did not provide a reason"}. This message may have been tampered with.`
             : state.verified === true
               ? "Decrypted — signature verified"
               : "Decrypted — not signed"

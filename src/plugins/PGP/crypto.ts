@@ -165,6 +165,13 @@ export async function encryptText({
 export interface DecryptTextResult {
   data: string;
   verified: boolean | null;
+  verificationError?: string;
+  signedBy?: string;
+}
+
+interface VerificationResult {
+  verified: boolean | null;
+  verificationError?: string;
   signedBy?: string;
 }
 
@@ -175,7 +182,7 @@ export interface DecryptTextResult {
 async function resolveVerified(
   signatures: Awaited<ReturnType<typeof openpgp.decrypt>>["signatures"],
   verifyKeys: openpgp.Key[],
-): Promise<{ verified: boolean | null; signedBy?: string; }> {
+): Promise<VerificationResult> {
   if (!signatures?.length) return { verified: null };
 
   for (const sig of signatures) {
@@ -189,9 +196,14 @@ async function resolveVerified(
     try {
       await sig.verified;
       return { verified: true, signedBy: sig.keyID.toHex() };
-    } catch {
-      // We held the right key and it still failed: genuinely bad.
-      return { verified: false };
+    } catch (error) {
+      // Preserve OpenPGP's exact reason for now. In particular, this lets us
+      // distinguish an actual digest mismatch from time/key-policy failures
+      // before changing which failures deserve the tampering warning.
+      const verificationError = error instanceof Error
+        ? error.message
+        : String(error);
+      return { verified: false, verificationError };
     }
   }
 
@@ -211,11 +223,12 @@ export async function decryptText(
     verificationKeys: verifyKeys.length ? verifyKeys : undefined,
   });
 
-  const { verified, signedBy } = await resolveVerified(signatures, verifyKeys);
+  const { verified, verificationError, signedBy } = await resolveVerified(signatures, verifyKeys);
 
   return {
     data: data as string,
     verified,
+    verificationError,
     signedBy,
   };
 }
@@ -257,6 +270,7 @@ export interface DecryptFileResult {
   bytes: Uint8Array;
   filename: string;
   verified: boolean | null;
+  verificationError?: string;
   signedBy?: string;
 }
 
@@ -274,12 +288,13 @@ export async function decryptFile(
     format: "binary",
   });
 
-  const { verified, signedBy } = await resolveVerified(signatures, verifyKeys);
+  const { verified, verificationError, signedBy } = await resolveVerified(signatures, verifyKeys);
 
   return {
     bytes: data as Uint8Array,
     filename,
     verified,
+    verificationError,
     signedBy,
   };
 }

@@ -31,6 +31,7 @@ import {
 import {
   handlePgpMessageCreate,
   installPgpNotificationInterceptor,
+  showPgpTestNotification,
   uninstallPgpNotificationInterceptor,
 } from "./notifications";
 import {
@@ -440,6 +441,24 @@ export default definePlugin({
             `PGP Enabled: ${isPgpEnabled() ? "✅ Yes" : "❌ No"}\n` +
             `Session Unlocked: ${isUnlocked() ? "✅ Yes" : "❌ No"}`,
         });
+      },
+    },
+
+    {
+      name: "pgp-test-notification",
+      description: "Show a locally encrypted PGP notification test",
+      inputType: ApplicationCommandInputType.BUILT_IN,
+      execute: async (_args, ctx) => {
+        try {
+          await showPgpTestNotification();
+          return sendBotMessage(ctx.channel.id, {
+            content: "PGP notification test sent locally. It should say: `PGP notification decrypted successfully.`",
+          });
+        } catch (error) {
+          return sendBotMessage(ctx.channel.id, {
+            content: `PGP notification test failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
       },
     },
 

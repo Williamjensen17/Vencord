@@ -4,9 +4,13 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { findByProps } from "@webpack";
 import { UserStore } from "@webpack/common";
 
+import { encryptText, parsePublicKey } from "./crypto";
+import { getOwnKeypair } from "./keystore";
 import { tryDecryptMessage } from "./messageDecrypt";
+import { getUnlockedPrivateKey, isUnlocked } from "./session";
 
 const PGP_MESSAGE_HEADER = "-----BEGIN PGP MESSAGE-----";
 const CANDIDATE_TTL_MS = 3_000;
@@ -32,8 +36,24 @@ interface PendingMessage {
 }
 
 let pendingMessages: PendingMessage[] = [];
-let originalNotification: typeof Notification | null = null;
-let wrappedNotification: typeof Notification | null = null;
+
+type ShowNotification = (
+  icon: string | null | undefined,
+  title: string,
+  body: string,
+  trackingProps: Record<string, unknown>,
+  options: Record<string, unknown>,
+) => Promise<unknown>;
+
+interface DiscordNotificationUtils {
+  hasPermission: (...args: unknown[]) => unknown;
+  playNotificationSound: (...args: unknown[]) => unknown;
+  showNotification: ShowNotification;
+}
+
+let notificationUtils: DiscordNotificationUtils | null = null;
+let originalShowNotification: ShowNotification | null = null;
+let wrappedShowNotification: ShowNotification | null = null;
 
 function prunePending(now = Date.now()) {
   pendingMessages = pendingMessages.filter(
@@ -115,105 +135,112 @@ async function decryptedNotificationBody(title: string, encryptedBody: string): 
     : plaintext;
 }
 
-type NotificationEventName = "click" | "close" | "error" | "show";
-
-/**
- * Discord assigns click/close handlers immediately after `new Notification()`.
- * Decryption is asynchronous, so return this local stand-in and transfer those
- * handlers to the real OS notification as soon as its decrypted body is ready.
- */
-class DeferredPgpNotification extends EventTarget {
-  onclick: ((this: Notification, ev: Event) => any) | null = null;
-  onclose: ((this: Notification, ev: Event) => any) | null = null;
-  onerror: ((this: Notification, ev: Event) => any) | null = null;
-  onshow: ((this: Notification, ev: Event) => any) | null = null;
-
-  private notification: Notification | null = null;
-  private closeRequested = false;
-
-  constructor(
-    private readonly NativeNotification: typeof Notification,
-    private readonly notificationTitle: string,
-    private readonly options: NotificationOptions,
-  ) {
-    super();
-    void this.show();
-  }
-
-  private async show() {
-    try {
-      const body = await decryptedNotificationBody(
-        this.notificationTitle,
-        this.options.body ?? "",
-      );
-
-      const notification = new this.NativeNotification(this.notificationTitle, {
-        ...this.options,
-        body,
-      });
-      this.notification = notification;
-
-      for (const type of ["click", "close", "error", "show"] as const) {
-        notification.addEventListener(type, event => this.forward(type, event));
-      }
-
-      if (this.closeRequested) notification.close();
-    } catch (error) {
-      console.error("[PGP] Failed to show decrypted notification", error);
-    }
-  }
-
-  private forward(type: NotificationEventName, event: Event) {
-    const handler = this[`on${type}`];
-    handler?.call(this as unknown as Notification, event);
-    this.dispatchEvent(new Event(type));
-  }
-
-  close() {
-    this.closeRequested = true;
-    this.notification?.close();
-  }
-}
-
-function isEncryptedPgpNotification(options?: NotificationOptions): boolean {
-  return options?.body?.includes(PGP_MESSAGE_HEADER) ?? false;
-}
-
 export function installPgpNotificationInterceptor() {
-  if (originalNotification || typeof Notification === "undefined") return;
+  if (notificationUtils) return;
 
-  originalNotification = Notification;
-  const NativeNotification = originalNotification;
+  // Discord captures `window.Notification` when its webpack module loads, long
+  // before plugins start. Replacing the global constructor therefore cannot
+  // affect message notifications. This is Discord's final notification helper,
+  // immediately before its native IPC / cached HTML5 constructor boundary.
+  const utils = findByProps(
+    "showNotification",
+    "playNotificationSound",
+    "hasPermission",
+  ) as DiscordNotificationUtils;
 
-  wrappedNotification = new Proxy(NativeNotification, {
-    construct(target, args) {
-      const [title, options] = args as [string, NotificationOptions?];
-
-      if (!isEncryptedPgpNotification(options)) {
-        return Reflect.construct(target, args);
-      }
-
-      return new DeferredPgpNotification(
-        NativeNotification,
+  notificationUtils = utils;
+  originalShowNotification = utils.showNotification;
+  wrappedShowNotification = (icon, title, body, trackingProps, options) => {
+    if (!body.includes(PGP_MESSAGE_HEADER)) {
+      return originalShowNotification!.call(
+        utils,
+        icon,
         title,
-        options ?? {},
-      ) as unknown as Notification;
-    },
-  });
+        body,
+        trackingProps,
+        options,
+      );
+    }
 
-  globalThis.Notification = wrappedNotification;
+    return decryptedNotificationBody(title, body).then(decryptedBody =>
+      originalShowNotification!.call(
+        utils,
+        icon,
+        title,
+        decryptedBody,
+        trackingProps,
+        options,
+      ),
+    );
+  };
+
+  utils.showNotification = wrappedShowNotification;
 }
 
 export function uninstallPgpNotificationInterceptor() {
   if (
-    originalNotification
-    && wrappedNotification
-    && globalThis.Notification === wrappedNotification
+    notificationUtils
+    && originalShowNotification
+    && wrappedShowNotification
+    && notificationUtils.showNotification === wrappedShowNotification
   ) {
-    globalThis.Notification = originalNotification;
+    notificationUtils.showNotification = originalShowNotification;
   }
 
-  originalNotification = null;
-  wrappedNotification = null;
+  notificationUtils = null;
+  originalShowNotification = null;
+  wrappedShowNotification = null;
   pendingMessages = [];
+}
+
+/** Runs the real encrypted notification path without needing another account. */
+export async function showPgpTestNotification() {
+  if (!notificationUtils || notificationUtils.showNotification !== wrappedShowNotification) {
+    throw new Error("PGP notification interceptor is not installed.");
+  }
+  if (!isUnlocked()) {
+    throw new Error("Unlock PGP first with /pgp-unlock.");
+  }
+
+  const ownKeypair = await getOwnKeypair();
+  if (!ownKeypair) {
+    throw new Error("No keypair exists. Run /pgp-generate first.");
+  }
+
+  const publicKey = await parsePublicKey(ownKeypair.publicKeyArmored);
+  if (!publicKey) throw new Error("Stored public key could not be parsed.");
+
+  const content = await encryptText({
+    text: "PGP notification decrypted successfully.",
+    recipientPublicKeys: [publicKey],
+    signingKey: getUnlockedPrivateKey(),
+  });
+  const currentUser = UserStore.getCurrentUser();
+
+  pendingMessages.push({
+    message: {
+      id: `pgp-notification-test-${Date.now()}`,
+      content,
+      author: {
+        id: currentUser?.id,
+        username: currentUser?.username,
+        globalName: currentUser?.globalName,
+      },
+    },
+    receivedAt: Date.now(),
+  });
+
+  await notificationUtils.showNotification(
+    null,
+    "PGP notification test",
+    content,
+    { notif_type: "PGP_TEST" },
+    {
+      isUserAvatar: false,
+      omitViewTracking: true,
+      sound: "message1",
+      tag: `pgp-notification-test-${Date.now()}`,
+      volume: 0.4,
+    },
+  );
 }

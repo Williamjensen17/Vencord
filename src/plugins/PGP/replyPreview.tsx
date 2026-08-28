@@ -4,24 +4,27 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { Parser, React } from "@webpack/common";
+import { React } from "@webpack/common";
 
 import { tryDecryptMessage } from "./messageDecrypt";
 import { getSessionGeneration, subscribeToSession } from "./session";
 
 const ReferencedMessageState = { LOADED: 0, NOT_LOADED: 1, DELETED: 2 } as const;
 
-function LockGlyph() {
-  return (
-    <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M12 2a5 5 0 0 0-5 5v2H6.5A1.5 1.5 0 0 0 5 10.5v9A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 17.5 9H17V7a5 5 0 0 0-5-5Zm3 7H9V7a3 3 0 1 1 6 0v2Z"
-      />
-    </svg>
-  );
-}
-
+/**
+ * Replaces the native reply-quote preview snippet with the decrypted text.
+ *
+ * Rather than drawing our own chrome next to Discord's reply (which never
+ * matched the native look), we write the decrypted text straight into the
+ * element Discord already renders for the referenced-message preview
+ * (`repliedTextContent`). That keeps everything else — the chevron, the
+ * "replied to @Name", the separators, hover, ellipsis truncation and
+ * click-to-jump — exactly as Discord draws it, so an encrypted reply reads
+ * like an ordinary one.
+ *
+ * The injected component itself renders a hidden anchor span so it survives as
+ * a DOM node for look-up; the actual text lives in Discord's preview element.
+ */
 export function PGPReplyPreview(props: any) {
   const referenced = props?.referencedMessage;
   const target = referenced?.state === ReferencedMessageState.LOADED
@@ -41,7 +44,7 @@ export function PGPReplyPreview(props: any) {
     error?: string;
   }>({ status: "idle" });
 
-  const selfRef = React.useRef<HTMLSpanElement>(null);
+  const anchorRef = React.useRef<HTMLSpanElement>(null);
 
   React.useEffect(() => {
     if (!armored || !target) return;
@@ -69,36 +72,39 @@ export function PGPReplyPreview(props: any) {
     };
   }, [armored, target?.id ?? "", target?.content ?? "", generation]);
 
-  React.useEffect(() => {
-    if (!armored || !selfRef.current) return;
+  // Write the decrypted text into Discord's native preview slot. Ran on every
+  // render (no deps) so that if Discord re-renders the quote and resets the
+  // snippet to the raw ciphertext, we re-apply immediately.
+  React.useLayoutEffect(() => {
+    if (!armored || !anchorRef.current) return;
 
-    const quote = selfRef.current.closest<HTMLElement>(
+    const quote = anchorRef.current.closest<HTMLElement>(
       "[class*='messageReference']",
-    ) ?? selfRef.current.parentElement;
+    ) ?? anchorRef.current.parentElement;
 
-    quote?.classList.add("vc-pgp-reply-decrypted");
-    return () => quote?.classList.remove("vc-pgp-reply-decrypted");
-  }, [armored, state.status]);
+    const preview = quote?.querySelector<HTMLElement>(
+      "[class*='repliedTextContent']",
+    ) ?? quote?.querySelector<HTMLElement>(
+      "[class*='repliedTextPreview']",
+    );
+
+    if (!preview) return;
+
+    let text: string;
+    if (state.status === "loading") {
+      text = "Decrypting…";
+    } else if (state.status === "error") {
+      text = state.error ?? "Unable to decrypt";
+    } else if (state.status === "success") {
+      text = state.plaintext ?? "";
+    } else {
+      text = "Unlock your key to read this message";
+    }
+
+    preview.textContent = text;
+  });
 
   if (!armored || !target) return null;
 
-  let label: React.ReactNode;
-  if (state.status === "loading") {
-    label = <span className="vc-pgp-reply-text">Decrypting…</span>;
-  } else if (state.status === "error") {
-    label = <span className="vc-pgp-reply-text">{state.error}</span>;
-  } else if (state.status === "success") {
-    label = <span className="vc-pgp-reply-text">
-      {Parser.parse(state.plaintext ?? "")}
-    </span>;
-  } else {
-    label = <span className="vc-pgp-reply-text">Unlock your key to read</span>;
-  }
-
-  return (
-    <span className="vc-pgp-reply" ref={selfRef}>
-      <span className="vc-pgp-reply-badge" aria-hidden="true"><LockGlyph /></span>
-      {label}
-    </span>
-  );
+  return <span ref={anchorRef} style={{ display: "none" }} />;
 }

@@ -77,9 +77,9 @@ export default definePlugin({
   patches: [
     {
       // Same module anchor as the official ReplyTimestamp/ValidReply plugins:
-      // the chat reply-quote renderer. We append our decrypted snippet next to
-      // the author name; the native ciphertext snippet is hidden by CSS via the
-      // vc-pgp-reply-decrypted tag (see start()).
+      // the chat reply-quote renderer. PGPReplyPreview writes the decrypted
+      // text into Discord's native preview element, so the reply keeps
+      // Discord's exact structure and styling (see replyPreview.tsx).
       find: "#{intl::REPLY_QUOTE_MESSAGE_NOT_LOADED}",
       replacement: {
         match: /\.onClickReply,.+?}\),(?=\i,\i,\i\])/,
@@ -836,35 +836,6 @@ export default definePlugin({
       .vc-pgp-attachment-size {
         color: var(--text-muted, inherit);
         font-size: 0.75rem;
-      }
-      /* Reply quote: our decrypted snippet, injected next to the author name.
-         The raw ciphertext snippet Discord draws shares the messageContent
-         class, so once we tag the quote (vc-pgp-reply-decrypted) it gets hidden
-         and only our readable text (and the native click-to-jump) remains. */
-      .vc-pgp-reply {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.25rem;
-        min-width: 0;
-        margin-left: 0.25rem;
-      }
-      .vc-pgp-reply-badge {
-        display: inline-flex;
-        flex-shrink: 0;
-        color: var(--text-muted, var(--text-normal, inherit));
-        opacity: 0.6;
-      }
-      .vc-pgp-reply-text {
-        display: inline-block;
-        max-width: 320px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        vertical-align: bottom;
-        color: var(--channels-default, var(--text-normal, inherit));
-      }
-      .vc-pgp-reply-decrypted [class*="messageContent"] {
-        display: none !important;
       }
     `;
 

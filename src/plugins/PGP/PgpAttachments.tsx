@@ -34,6 +34,7 @@ type State =
     filename: string;
     kind: "image" | "video" | "audio" | "file";
     verified: boolean | null;
+    verificationError?: string;
     size: number;
   };
 
@@ -152,6 +153,7 @@ function One({ attachment, senderId }: { attachment: PgpAttachment; senderId: st
           filename,
           kind: classify(filename),
           verified: result.verified,
+          verificationError: result.verificationError,
           size: result.bytes.length,
         });
       } catch (err) {
@@ -188,7 +190,7 @@ function One({ attachment, senderId }: { attachment: PgpAttachment; senderId: st
   }
 
   const title = state.verified === false
-    ? "Decrypted — SIGNATURE INVALID. This file may have been tampered with."
+    ? `Decrypted — SIGNATURE INVALID: ${state.verificationError ?? "OpenPGP did not provide a reason"}. This file may have been tampered with.`
     : state.verified === true
       ? "Decrypted — signature verified"
       : "Decrypted — not signed";

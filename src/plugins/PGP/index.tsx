@@ -707,6 +707,29 @@ export default definePlugin({
         line-height: 1.125rem;
         white-space: pre-wrap;
       }
+      /* Discord's native reply preview contains the raw armored message. Hide
+         it for encrypted replies and render the decrypted sibling instead. */
+      .vc-pgp-reply [class*="repliedTextContent"],
+      .vc-pgp-reply [class*="repliedTextPreview"] {
+        display: none !important;
+      }
+      .vc-pgp-reply-text {
+        color: var(--text-default, var(--text-normal, inherit));
+        font-size: 0.875rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+        cursor: pointer;
+      }
+      .vc-pgp-reply-text:hover {
+        color: var(--interactive-active, var(--text-default, var(--text-normal, inherit)));
+        filter: brightness(1.1);
+      }
+      .vc-pgp-reply:hover [class*="repliedMessageClickableSpine"] {
+        color: var(--interactive-active, var(--text-normal, inherit)) !important;
+        filter: brightness(1.1);
+      }
       .vc-pgp-embed-image {
         margin-top: 0.5rem;
         max-width: 100%;

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { React } from "@webpack/common";
+import { Parser, React } from "@webpack/common";
 
 import { tryDecryptMessage } from "./messageDecrypt";
 import { getSessionGeneration, subscribeToSession } from "./session";
@@ -12,18 +12,18 @@ import { getSessionGeneration, subscribeToSession } from "./session";
 const ReferencedMessageState = { LOADED: 0, NOT_LOADED: 1, DELETED: 2 } as const;
 
 /**
- * Replaces the native reply-quote preview snippet with the decrypted text.
+ * Decrypted reply-quote preview.
  *
- * Rather than drawing our own chrome next to Discord's reply (which never
- * matched the native look), we write the decrypted text straight into the
- * element Discord already renders for the referenced-message preview
- * (`repliedTextContent`). That keeps everything else — the chevron, the
- * "replied to @Name", the separators, hover, ellipsis truncation and
- * click-to-jump — exactly as Discord draws it, so an encrypted reply reads
- * like an ordinary one.
+ * Discord's reply quote renders the referenced message's first line into a
+ * React-controlled element (`repliedTextContent`). Writing into that element
+ * directly does not survive: React owns it and reverts the text on the next
+ * commit, so the decrypted text vanishes.
  *
- * The injected component itself renders a hidden anchor span so it survives as
- * a DOM node for look-up; the actual text lives in Discord's preview element.
+ * Instead we render our own span right next to Discord's preview (the injected
+ * component is a sibling in the quote's children array) and, for encrypted
+ * replies, hide Discord's original ciphertext preview. Our span is a normal
+ * React child, so it stays rendered and scrolls/truncates like Discord's own
+ * snippet.
  */
 export function PGPReplyPreview(props: any) {
   const referenced = props?.referencedMessage;
@@ -44,7 +44,7 @@ export function PGPReplyPreview(props: any) {
     error?: string;
   }>({ status: "idle" });
 
-  const anchorRef = React.useRef<HTMLSpanElement>(null);
+  const selfRef = React.useRef<HTMLSpanElement>(null);
 
   React.useEffect(() => {
     if (!armored || !target) return;
@@ -72,39 +72,53 @@ export function PGPReplyPreview(props: any) {
     };
   }, [armored, target?.id ?? "", target?.content ?? "", generation]);
 
-  // Write the decrypted text into Discord's native preview slot. Ran on every
-  // render (no deps) so that if Discord re-renders the quote and resets the
-  // snippet to the raw ciphertext, we re-apply immediately.
+  // Tag the reply quote so CSS can hide Discord's own ciphertext preview.
   React.useLayoutEffect(() => {
-    if (!armored || !anchorRef.current) return;
+    if (!armored || !selfRef.current) return;
 
-    const quote = anchorRef.current.closest<HTMLElement>(
+    const quote = selfRef.current.closest<HTMLElement>(
       "[class*='messageReference']",
-    ) ?? anchorRef.current.parentElement;
+    ) ?? selfRef.current.parentElement;
 
-    const preview = quote?.querySelector<HTMLElement>(
-      "[class*='repliedTextContent']",
-    ) ?? quote?.querySelector<HTMLElement>(
-      "[class*='repliedTextPreview']",
-    );
+    quote?.classList.add("vc-pgp-reply");
+    return () => quote?.classList.remove("vc-pgp-reply");
+  }, [armored]);
 
-    if (!preview) return;
+  // The patch injects this component immediately after the clickable spine,
+  // before the avatar and name. Move it to the end of the quote so it occupies
+  // Discord's native preview position. This runs before every paint because
+  // React may restore the node to its original child-array position.
+  React.useLayoutEffect(() => {
+    if (!armored) return;
 
-    let text: string;
-    if (state.status === "loading") {
-      text = "Decrypting…";
-    } else if (state.status === "error") {
-      text = state.error ?? "Unable to decrypt";
-    } else if (state.status === "success") {
-      text = state.plaintext ?? "";
-    } else {
-      text = "Unlock your key to read this message";
-    }
+    const el = selfRef.current;
+    const parent = el?.parentElement;
+    if (!el || !parent || parent.lastElementChild === el) return;
 
-    preview.textContent = text;
+    parent.appendChild(el);
   });
 
   if (!armored || !target) return null;
 
-  return <span ref={anchorRef} style={{ display: "none" }} />;
+  const text: React.ReactNode =
+    state.status === "loading"
+      ? "Decrypting…"
+      : state.status === "error"
+        ? (state.error ?? "Unable to decrypt")
+        : state.status === "success"
+          ? Parser.parse(state.plaintext ?? "")
+          : "Unlock your key to read this message";
+
+  const onClick = props?.onClickReply;
+
+  return (
+    <span
+      ref={selfRef}
+      className="vc-pgp-reply-text"
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+    >
+      {text}
+    </span>
+  );
 }

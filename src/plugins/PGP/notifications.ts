@@ -42,8 +42,12 @@ type ShowNotification = (
   title: string,
   body: string,
   trackingProps: Record<string, unknown>,
-  options: Record<string, unknown>,
+  options: DiscordNotificationOptions,
 ) => Promise<unknown>;
+
+interface DiscordNotificationOptions extends Record<string, unknown> {
+  messageRecord?: NotificationMessage;
+}
 
 interface DiscordNotificationUtils {
   hasPermission: (...args: unknown[]) => unknown;
@@ -110,12 +114,26 @@ function takePendingMessage(title: string, body: string): NotificationMessage | 
   return pendingMessages.splice(index, 1)[0].message;
 }
 
-async function decryptedNotificationBody(title: string, encryptedBody: string): Promise<string> {
-  // Discord constructs its Notification during the synchronous Flux dispatch.
-  // Let every MESSAGE_CREATE subscriber run before consuming the candidate.
-  await new Promise<void>(resolve => setTimeout(resolve, 0));
+async function decryptedNotificationBody(
+  title: string,
+  encryptedBody: string,
+  messageRecord?: NotificationMessage,
+): Promise<string> {
+  let message = messageRecord;
 
-  const message = takePendingMessage(title, encryptedBody);
+  if (message) {
+    // Avoid retaining the duplicate recorded by our MESSAGE_CREATE handler.
+    pendingMessages = pendingMessages.filter(({ message: pending }) =>
+      pending.id !== message!.id,
+    );
+  } else {
+    // The generic NOTIFICATION_CREATE path has no messageRecord. Discord may
+    // construct it during the same synchronous Flux dispatch, so allow every
+    // MESSAGE_CREATE subscriber to run before consuming the fallback queue.
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    message = takePendingMessage(title, encryptedBody) ?? undefined;
+  }
+
   if (!message) return "Encrypted PGP message";
 
   const result = await tryDecryptMessage(
@@ -151,7 +169,11 @@ export function installPgpNotificationInterceptor() {
   notificationUtils = utils;
   originalShowNotification = utils.showNotification;
   wrappedShowNotification = (icon, title, body, trackingProps, options) => {
-    if (!body.includes(PGP_MESSAGE_HEADER)) {
+    const { messageRecord } = options;
+    const isEncrypted = body.includes(PGP_MESSAGE_HEADER)
+      || messageRecord?.content.includes(PGP_MESSAGE_HEADER);
+
+    if (!isEncrypted) {
       return originalShowNotification!.call(
         utils,
         icon,
@@ -162,7 +184,7 @@ export function installPgpNotificationInterceptor() {
       );
     }
 
-    return decryptedNotificationBody(title, body).then(decryptedBody =>
+    return decryptedNotificationBody(title, body, messageRecord).then(decryptedBody =>
       originalShowNotification!.call(
         utils,
         icon,
@@ -237,6 +259,7 @@ export async function showPgpTestNotification() {
     { notif_type: "PGP_TEST" },
     {
       isUserAvatar: false,
+      messageRecord: pendingMessages.at(-1)?.message,
       omitViewTracking: true,
       sound: "message1",
       tag: `pgp-notification-test-${Date.now()}`,

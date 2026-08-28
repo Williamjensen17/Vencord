@@ -27,7 +27,7 @@ import {
   createAndUnlockNewKeypair,
 } from "./session";
 
-import { changePassphrase } from "./crypto";
+import { changePassphrase, looksLikeArmoredPrivateKey, normalizeArmoredText } from "./crypto";
 import { getOwnPublicKeyArmored, importFriendPublicKey } from "./keyExchange";
 
 import {
@@ -435,6 +435,145 @@ export default definePlugin({
         return sendBotMessage(ctx.channel.id, {
           content: ok ? "PGP unlocked ✅" : "Incorrect passphrase ❌",
         });
+      },
+    },
+
+    // ✅ EXPORT OWN KEYPAIR
+    {
+      name: "pgp-export",
+      description: "Export your own PGP public and/or private key for use in other tools",
+      inputType: ApplicationCommandInputType.BUILT_IN,
+      options: [
+        {
+          name: "type",
+          description: "Which key to export",
+          type: ApplicationCommandOptionType.STRING,
+          required: false,
+          choices: [
+            { name: "Both keys (public + private)", value: "both", displayName: "Both keys (public + private)" },
+            { name: "Public key only", value: "public", displayName: "Public key only" },
+            { name: "Private key only", value: "private", displayName: "Private key only" },
+          ],
+        },
+      ],
+      execute: async (args, ctx) => {
+        try {
+          const record = await getOwnKeypair();
+          if (!record) {
+            return sendBotMessage(ctx.channel.id, {
+              content: "❌ No keypair found. Run `/pgp-generate` first.",
+            });
+          }
+
+          const type = findOption(args, "type", "both");
+          const parts: string[] = [];
+
+          if (type === "both" || type === "public") {
+            parts.push(`**Public key:**\n\`\`\`\n${record.publicKeyArmored}\n\`\`\``);
+          }
+          if (type === "both" || type === "private") {
+            parts.push(
+              "⚠️ **The private key below unlocks all your encrypted messages. Do not share it.**\n" +
+              `\`\`\`\n${record.privateKeyArmored}\n\`\`\``
+            );
+          }
+
+          return sendBotMessage(ctx.channel.id, { content: parts.join("\n\n") });
+        } catch (err) {
+          return sendBotMessage(ctx.channel.id, {
+            content: `Error: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          });
+        }
+      },
+    },
+
+    // ✅ IMPORT OWN KEYPAIR
+    {
+      name: "pgp-import-keypair",
+      description: "Import a PGP keypair (private + optional public) to use as your own",
+      inputType: ApplicationCommandInputType.BUILT_IN,
+      options: [
+        {
+          name: "privatekey",
+          description: "Armored private key block",
+          type: ApplicationCommandOptionType.STRING,
+          required: true,
+        },
+        {
+          name: "publickey",
+          description: "Armored public key block (derived from private key if omitted)",
+          type: ApplicationCommandOptionType.STRING,
+          required: false,
+        },
+        {
+          name: "force",
+          description: "Overwrite existing keypair (WARNING: breaks unread encrypted messages)",
+          type: ApplicationCommandOptionType.BOOLEAN,
+          required: false,
+        },
+      ],
+      execute: async (args, ctx) => {
+        try {
+          const rawPrivate = findOption(args, "privatekey", "");
+          const rawPublic = findOption(args, "publickey", "");
+
+          const normalizedPrivate = normalizeArmoredText(rawPrivate);
+          if (!looksLikeArmoredPrivateKey(normalizedPrivate)) {
+            return sendBotMessage(ctx.channel.id, {
+              content: "❌ The provided private key does not look like a valid armored PGP private key block.",
+            });
+          }
+
+          // Validate by reading the key with openpgp
+          const openpgp = await import("openpgp");
+          const parsedPrivate = await openpgp.readPrivateKey({ armoredKey: normalizedPrivate });
+
+          let publicKeyArmored: string;
+          let fingerprint: string;
+
+          if (rawPublic) {
+            const normalizedPublic = normalizeArmoredText(rawPublic);
+            const parsedPublic = await openpgp.readKey({ armoredKey: normalizedPublic });
+            publicKeyArmored = parsedPublic.armor();
+            fingerprint = parsedPublic.getFingerprint();
+          } else {
+            // Derive the public key from the private key
+            const publicKey = parsedPrivate.toPublic();
+            publicKeyArmored = publicKey.armor();
+            fingerprint = parsedPrivate.getFingerprint();
+          }
+
+          const existing = await getOwnKeypair();
+          if (existing && !findOption(args, "force", false)) {
+            return sendBotMessage(ctx.channel.id, {
+              content:
+                "⚠️ You already have a keypair (fingerprint `" + existing.fingerprint + "`).\n" +
+                "To replace it, re-run with `force:true`. This will make messages encrypted to the old key unreadable.",
+            });
+          }
+
+          await saveOwnKeypair({
+            privateKeyArmored: normalizedPrivate,
+            publicKeyArmored,
+            fingerprint,
+            createdAt: Date.now(),
+          });
+
+          return sendBotMessage(ctx.channel.id, {
+            content:
+              "✅ Keypair imported and saved.\n" +
+              `Fingerprint: \`${fingerprint}\`\n` +
+              "Run `/pgp-unlock` to unlock it for this session.",
+          });
+        } catch (err) {
+          return sendBotMessage(ctx.channel.id, {
+            content: `Error: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          });
+        }
       },
     },
   ],

@@ -66,7 +66,7 @@ Additionally, make sure not to post screenshots with Vencord in a server where y
 
 
 
-##First Install: 
+## First Install: 
 Make sure Nodejs/pnpm and git is installed
 git clone the repo
 cd into the repo
@@ -74,7 +74,7 @@ Run ```pnpm build```
 then ```pnpm inject```
 then discord will restart, and you can now enable the PGP plugin in vencord settings
 
-##PGP USAGE:
+## PGP USAGE:
 Use the ```/pgp-import-keypair``` command to import yopur keypair
 or use the ```/pgp-generate``` command to generate a new keypair
 
@@ -90,7 +90,7 @@ you can also set a password to protect your private key
 You can see PGP status by running ```/pgp-status```
 
 
-##Fork Update:
+## Fork Update:
 git fetch
 git pull
 pnpm build

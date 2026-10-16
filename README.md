@@ -66,7 +66,31 @@ Additionally, make sure not to post screenshots with Vencord in a server where y
 
 
 
-Fork Update:
+##First Install: 
+Make sure Nodejs/pnpm and git is installed
+git clone the repo
+cd into the repo
+Run ```pnpm build```
+then ```pnpm inject```
+then discord will restart, and you can now enable the PGP plugin in vencord settings
+
+##PGP USAGE:
+Use the ```/pgp-import-keypair``` command to import yopur keypair
+or use the ```/pgp-generate``` command to generate a new keypair
+
+You can use the ```/pgp-pubkey``` to send your public key to the current channel.
+Then Use ```/pgp-import```to import your friends public key (1:1 DM only)
+
+
+Use ```/pgp-unlock``` to see your private messages
+and ```/pgp-lock``` to lock your private messages
+theres a auto unlock feature that can be enabled in settings
+you can also set a password to protect your private key 
+
+You can see PGP status by running ```/pgp-status```
+
+
+##Fork Update:
 git fetch
 git pull
 pnpm build

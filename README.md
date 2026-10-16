@@ -91,6 +91,6 @@ You can see PGP status by running ```/pgp-status```
 
 
 ## Fork Update:
-git fetch
-git pull
-pnpm build
+```git fetch```
+```git pull```
+```pnpm build```

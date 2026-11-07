@@ -310,7 +310,22 @@ importers:
       gifenc:
         specifier: 'catalog:'
         version: https://codeload.github.com/mattdesl/gifenc/tar.gz/64842fca317b112a8590f8fef2bf3825da8f6fe3
+      monaco-editor:
+        specifier: ^0.55.1
+        version: 0.55.1
+      nanoid:
+        specifier: ^5.1.16
+        version: 5.1.16
+      openpgp:
+        specifier: ^6.3.1
+        version: 6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@26.0.1)(typescript@6.0.3))
+      virtual-merge:
+        specifier: ^1.0.1
+        version: 1.0.2
     devDependencies:
+      '@openpgp/web-stream-tools':
+        specifier: ^0.3.1
+        version: 0.3.1(@types/node@26.0.1)(typescript@6.0.3)
       '@stylistic/eslint-plugin':
         specifier: 'catalog:'
         version: 5.10.0(eslint@10.13.0(supports-color@10.2.2))
@@ -773,6 +788,20 @@ packages:
 
   '@puppeteer/browsers@3.2.6':
     resolution: {integrity: sha512-MJP29gVoHznmqmwhH1tlZqzfeQ3aylTpSSa6WKZXtkwYUH02i9imBmWGTyZrbnAou5paX78SE4jMAUqnEPf8ug==}
+  '@openpgp/web-stream-tools@0.3.1':
+    resolution: {integrity: sha512-EV+VQ4Dr8b+JmlGnc74FLgx7EhLyydOr4j6s6Hp+2scQh6sLQMs2h+1oEYUIslXcQPicWKG5ZQx+/dua0dgPWA==}
+    engines: {node: '>= 18.0.0'}
+    peerDependencies:
+      '@types/node': '>=18.0.0'
+      typescript: '>=4.7'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
+      typescript:
+        optional: true
+
+  '@puppeteer/browsers@3.0.5':
+    resolution: {integrity: sha512-xYXNuEQmHNIPWWcbL/skf2KF7seyp7c1xmKFRk3wmdFx7VwBsKVrtOLKs8ecaezsKPsWeF1YsgwIiElAscaryA==}
     engines: {node: '>=22.12.0'}
     hasBin: true
     peerDependencies:
@@ -2174,6 +2203,15 @@ packages:
     resolution: {integrity: sha512-gXah6aZrcUxjWg2zR2MwouP2eHlCBzdV4pygudehaKXSGW4v2AsRQUK+lwwXhii6KFZcunEnmSUoYp5CXibxtA==}
     engines: {node: '>= 0.4'}
 
+  openpgp@6.3.1:
+    resolution: {integrity: sha512-7oSPvmlKPojxFoyelT5DWPIAVmqWZh4qU/5pO6bdoShEtRpCw9Sye9IXUQj6EFM3XpgGssqccAr705YtTcLNQw==}
+    engines: {node: '>= 18.0.0', typescript: '>= 5.0.0'}
+    peerDependencies:
+      '@openpgp/web-stream-tools': ~0.3.0
+    peerDependenciesMeta:
+      '@openpgp/web-stream-tools':
+        optional: true
+
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
     engines: {node: '>= 0.8.0'}
@@ -3035,6 +3073,12 @@ snapshots:
       fastq: 1.20.1
 
   '@puppeteer/browsers@3.2.6':
+  '@openpgp/web-stream-tools@0.3.1(@types/node@26.0.1)(typescript@6.0.3)':
+    optionalDependencies:
+      '@types/node': 26.0.1
+      typescript: 6.0.3
+
+  '@puppeteer/browsers@3.0.5':
     dependencies:
       modern-tar: 0.8.6
       yargs: 18.0.0
@@ -4721,6 +4765,10 @@ snapshots:
       call-bound: 1.0.4
       define-properties: 1.2.1
       es-object-atoms: 1.1.2
+
+  openpgp@6.3.1(@openpgp/web-stream-tools@0.3.1(@types/node@26.0.1)(typescript@6.0.3)):
+    optionalDependencies:
+      '@openpgp/web-stream-tools': 0.3.1(@types/node@26.0.1)(typescript@6.0.3)
 
   optionator@0.9.4:
     dependencies:

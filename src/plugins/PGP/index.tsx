@@ -16,6 +16,7 @@ import {
 } from "@api/MessageAccessories";
 import { managedStyleRootNode } from "@api/Styles";
 import ErrorBoundary from "@components/ErrorBoundary";
+import { Devs } from "@utils/constants";
 import { createAndAppendStyle } from "@utils/css";
 import definePlugin from "@utils/types";
 import { ChannelStore } from "@webpack/common";
@@ -62,7 +63,7 @@ export default definePlugin({
   name: "PGP",
   description:
     "Encrypts outgoing messages/files with PGP and decrypts incoming ones.",
-  authors: [{ name: "William", id: 0n }],
+  authors: [Devs.William],
   settings,
 
   // Without these Vencord won't auto-enable the APIs, and the missing

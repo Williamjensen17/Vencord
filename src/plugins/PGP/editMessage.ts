@@ -5,7 +5,7 @@
  */
 
 import { findByProps } from "@webpack";
-import { MessageStore, showToast, Toasts } from "@webpack/common";
+import { MessageStore, showToast } from "@webpack/common";
 
 import { tryDecryptMessage } from "./messageDecrypt";
 import { encryptPgpContentForChannel } from "./outgoing";
@@ -70,10 +70,10 @@ async function beginPgpEdit(
   );
 
   if (!result?.success || result.plaintext == null) {
-    showToast(
-      result?.error ?? "Could not decrypt this message for editing.",
-      Toasts.Type.FAILURE,
-    );
+    showToast({
+      text: result?.error ?? "Could not decrypt this message for editing.",
+      variant: "critical",
+    });
     return;
   }
 
@@ -118,10 +118,10 @@ export function installPgpEditInterceptor() {
         content: encrypted,
       });
     } catch (caught) {
-      showToast(
-        caught instanceof Error ? caught.message : String(caught),
-        Toasts.Type.FAILURE,
-      );
+      showToast({
+        text: caught instanceof Error ? caught.message : String(caught),
+        variant: "critical",
+      });
     }
   };
   actions.editMessage = wrappedEditMessage;
